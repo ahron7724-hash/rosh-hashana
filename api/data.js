@@ -3,9 +3,9 @@
 // PUT  /api/data        { data } -> { ok, rev }
 //
 // The whole menu is stored as a single JSON object in Vercel Blob
-// (menu-data.json). Enable it in the Vercel dashboard: Storage -> Blob ->
-// connect to this project, then redeploy. Until then the app runs in
-// local mode (localStorage) on its own.
+// (menu-data.json), read and written only by this function. Enable it in the
+// Vercel dashboard: Storage -> Blob -> connect to this project, then redeploy.
+// Until then the app runs in local mode (localStorage) on its own.
 
 import { list, put } from '@vercel/blob'
 
@@ -24,6 +24,22 @@ function resolveToken() {
   return anyKey ? env[anyKey] : ''
 }
 
+async function readDoc(token) {
+  const { blobs } = await list({ prefix: BLOB_PATH, limit: 100, token })
+  const hit = blobs.find((b) => b.pathname === BLOB_PATH)
+  if (!hit) return { rev: 0, data: null }
+  // downloadUrl is a fresh, directly-fetchable link (signed for private stores).
+  const target = hit.downloadUrl || hit.url
+  const r = await fetch(target, { cache: 'no-store' })
+  if (!r.ok) {
+    const err = new Error('blob-read-' + r.status)
+    err.status = r.status
+    throw err
+  }
+  const doc = await r.json()
+  return { rev: doc.rev || 0, data: doc.data ?? null }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
@@ -34,13 +50,8 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { blobs } = await list({ prefix: BLOB_PATH, limit: 100, token })
-      const hit = blobs.find((b) => b.pathname === BLOB_PATH)
-      if (!hit) return res.status(200).json({ rev: 0, data: null })
-      const r = await fetch(hit.url, { cache: 'no-store' })
-      if (!r.ok) return res.status(200).json({ rev: 0, data: null })
-      const doc = await r.json()
-      return res.status(200).json({ rev: doc.rev || 0, data: doc.data ?? null })
+      const { rev, data } = await readDoc(token)
+      return res.status(200).json({ rev, data: data ?? null })
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {
@@ -51,7 +62,7 @@ export default async function handler(req, res) {
       }
       const rev = Date.now()
       await put(BLOB_PATH, JSON.stringify({ rev, data }), {
-        access: 'public',
+        access: 'private',
         contentType: 'application/json',
         addRandomSuffix: false,
         allowOverwrite: true,
