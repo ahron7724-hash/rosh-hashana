@@ -443,7 +443,7 @@ function DishDialog({ data, editing, defaultCategoryId, onCancel, onSave }) {
           </select>
         </label>
         <label className="field">
-          <span>מי מביא? (אפשר להשאיר ריק)</span>
+          <span>מי מכין? (אפשר להשאיר ריק)</span>
           <select value={takenBy} onChange={(e) => setTakenBy(e.target.value)}>
             <option value="">— עדיין לא נבחר —</option>
             {people.map((p) => (
@@ -633,7 +633,7 @@ function DishRow({ dish, owner, onToggleDone, onOpenAssign, onEdit, onDelete }) 
             <span>{owner.name}</span>
           </>
         ) : (
-          <span>מי מביא?</span>
+          <span>מי מכין?</span>
         )}
       </button>
       <RowMenu
@@ -759,7 +759,7 @@ function AssignDialog({ dish, people, me, onPick, onCancel }) {
   const others = people.filter((p) => p.id !== me)
   return (
     <Dialog title={dish.name} onCancel={onCancel}>
-      <p className="dialog-lead">מי מביא את זה?</p>
+      <p className="dialog-lead">מי מכין את זה?</p>
       <div className="assign-opts">
         <button
           className={'assign-opt me' + (dish.takenBy && dish.takenBy === me ? ' on' : '')}
@@ -1110,7 +1110,7 @@ export default function App() {
         <aside className="col-aside">
           <div className="panel">
             <h2>כרטיסי שמות</h2>
-            <div className="sub">מי מביא מה — ואפשר לסמן ✓ כשמוכן</div>
+            <div className="sub">מי מכין מה — ואפשר לסמן ✓ כשמוכן</div>
 
             <button
               className={'allcard' + (activePerson === null ? ' sel' : '')}
@@ -1155,7 +1155,7 @@ export default function App() {
             </button>
             <div className="tip">
               <Sparkle size={15} />
-              <div>לא חייבים שכל אחד יביא הכול — אפשר לחלק גם קניות, כלים, קרח והסעות.</div>
+              <div>לא חייבים שכל אחד יכין הכול — אפשר לחלק גם קניות, כלים, קרח והסעות.</div>
             </div>
           </div>
         </aside>
