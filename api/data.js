@@ -12,15 +12,18 @@ import { list, put } from '@vercel/blob'
 const BLOB_PATH = 'menu-data.json'
 
 // Vercel names the Blob token BLOB_READ_WRITE_TOKEN by default, but a
-// non-default store prefix produces e.g. rosh_hashana_blob_READ_WRITE_TOKEN.
+// non-default store prefix produces e.g. MENU_BLOB_READ_WRITE_TOKEN.
+// Pick the first env var that holds a real token, ignoring empty/stale ones.
 function resolveToken() {
   const env = process.env
-  if (env.BLOB_READ_WRITE_TOKEN) return env.BLOB_READ_WRITE_TOKEN
-  const keys = Object.keys(env)
-  const blobKey = keys.find((k) => /BLOB/i.test(k) && /READ_WRITE_TOKEN$/i.test(k))
-  if (blobKey) return env[blobKey]
-  const anyKey = keys.find((k) => /READ_WRITE_TOKEN$/i.test(k))
-  return anyKey ? env[anyKey] : ''
+  const real = (v) => typeof v === 'string' && v.startsWith('vercel_blob_rw_')
+  if (real(env.BLOB_READ_WRITE_TOKEN)) return env.BLOB_READ_WRITE_TOKEN
+  const rw = Object.keys(env).filter((k) => /READ_WRITE_TOKEN$/i.test(k))
+  const valid = rw.filter((k) => real(env[k]))
+  const best = valid.find((k) => /BLOB/i.test(k)) || valid[0]
+  if (best) return env[best]
+  const nonEmpty = rw.find((k) => env[k])
+  return nonEmpty ? env[nonEmpty] : ''
 }
 
 export default async function handler(req, res) {
