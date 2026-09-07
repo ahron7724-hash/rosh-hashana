@@ -1,19 +1,17 @@
 // One shared "data file" for the family menu.
-// GET  /api/data       -> { rev, data }   (data is null until first write)
+// GET  /api/data       -> 200 { rev, data }   (data:null, rev:0 = store is empty)
+//                          502 { error }       (blob exists but could not be read)
 // PUT  /api/data        { data } -> { ok, rev }
 //
-// The whole menu is stored as a single JSON object in a PUBLIC Vercel Blob
-// store (menu-data.json). Writes go only through this function; the store
-// URL is random and unguessable. Enable it in the Vercel dashboard:
-// Storage -> Blob (Public) -> connect to this project, then redeploy.
+// The whole menu is one JSON object in a PUBLIC Vercel Blob store
+// (menu-data.json). Writes go only through this function.
 
 import { list, put } from '@vercel/blob'
 
 const BLOB_PATH = 'menu-data.json'
 
-// Vercel names the Blob token BLOB_READ_WRITE_TOKEN by default, but a
-// non-default store prefix produces e.g. MENU_BLOB_READ_WRITE_TOKEN.
-// Pick the first env var that holds a real token, ignoring empty/stale ones.
+// Vercel names the token BLOB_READ_WRITE_TOKEN by default; a custom store
+// prefix produces e.g. menu_READ_WRITE_TOKEN. Pick the first real token.
 function resolveToken() {
   const env = process.env
   const real = (v) => typeof v === 'string' && v.startsWith('vercel_blob_rw_')
@@ -30,27 +28,6 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
   const token = resolveToken()
-
-  // Diagnostics: /api/data?debug=1
-  if (req.method === 'GET' && req.query && req.query.debug === '1') {
-    const envKeys = Object.keys(process.env).filter((k) => /BLOB|READ_WRITE_TOKEN|KV_|UPSTASH|REDIS/i.test(k))
-    const out = { envKeys, tokenFound: !!token, tokenHead: token ? token.slice(0, 32) : null, write: 'skipped' }
-    if (token) {
-      for (const access of ['public', 'private']) {
-        try {
-          await put('debug-' + access + '.json', JSON.stringify({ t: Date.now() }), {
-            access, contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true, token,
-          })
-          out.write = 'ok:' + access
-          break
-        } catch (e) {
-          out.write = 'fail:' + access + ':' + String((e && e.message) || e)
-        }
-      }
-    }
-    return res.status(200).json(out)
-  }
-
   if (!token) {
     return res.status(501).json({ error: 'blob-not-configured' })
   }
@@ -59,9 +36,9 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       const { blobs } = await list({ prefix: BLOB_PATH, limit: 100, token })
       const hit = blobs.find((b) => b.pathname === BLOB_PATH)
-      if (!hit) return res.status(200).json({ rev: 0, data: null })
+      if (!hit) return res.status(200).json({ rev: 0, data: null }) // store empty
       const r = await fetch(hit.downloadUrl || hit.url, { cache: 'no-store' })
-      if (!r.ok) return res.status(200).json({ rev: 0, data: null })
+      if (!r.ok) return res.status(502).json({ error: 'blob-read-' + r.status }) // exists but unreadable
       const doc = await r.json()
       return res.status(200).json({ rev: doc.rev || 0, data: doc.data ?? null })
     }

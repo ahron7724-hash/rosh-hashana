@@ -231,28 +231,50 @@ function createStore(onMode) {
     } catch (e) {}
   }
 
-  async function init() {
-    let j = null
+  async function getRemote() {
     try {
       const r = await fetch(API, { cache: 'no-store' })
       const ct = r.headers.get('content-type') || ''
-      if (r.ok && ct.includes('json')) j = await r.json()
-    } catch (e) {}
+      const j = ct.includes('json') ? await r.json().catch(() => null) : null
+      return { status: r.status, j }
+    } catch (e) {
+      return { status: 0, j: null }
+    }
+  }
+
+  async function init() {
+    const { status, j } = await getRemote()
     if (dead) return
-    if (j) {
-      setMode('remote')
-      if (j.data && j.rev) {
-        lastRev = j.rev
-        state = normalize(j.data)
+
+    // No usable backend (dev server / static host / blob not configured) -> local mode.
+    if (!status || status === 501 || !j) {
+      setMode('local')
+      return
+    }
+
+    setMode('remote')
+    if (status === 200 && j.data && j.rev) {
+      // adopt the existing shared menu
+      lastRev = j.rev
+      state = normalize(j.data)
+      saveLocal()
+      emit()
+    } else if (status === 200 && j.data == null) {
+      // store is confirmed empty — re-check once, then seed with what we have
+      const again = await getRemote()
+      if (dead) return
+      if (again.status === 200 && again.j && again.j.data && again.j.rev) {
+        lastRev = again.j.rev
+        state = normalize(again.j.data)
         saveLocal()
         emit()
-      } else {
-        await push() // server is empty — seed it from what we have
+      } else if (again.status === 200 && again.j && again.j.data == null) {
+        await push()
       }
-      pollTimer = setInterval(poll, POLL_MS)
-    } else {
-      setMode('local')
     }
+    // else: read error (502) or ambiguous — do NOT seed / overwrite.
+    // poll() adopts the real data as soon as it becomes readable.
+    pollTimer = setInterval(poll, POLL_MS)
   }
   init()
 
