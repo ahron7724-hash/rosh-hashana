@@ -1038,6 +1038,12 @@ export default function App() {
             </div>
           )}
 
+          {cats.length > 0 && !activePerson && (
+            <button className="add-cat" onClick={() => setDialog({ type: 'category' })}>
+              <Plus size={17} /> הוספת נושא חדש
+            </button>
+          )}
+
           {cats.map((cat, idx) => {
             const all = dishesByCat[cat.id] || []
             let list = all
@@ -1063,12 +1069,6 @@ export default function App() {
               />
             )
           })}
-
-          {cats.length > 0 && !activePerson && (
-            <button className="add-cat" onClick={() => setDialog({ type: 'category' })}>
-              <Plus size={16} /> נושא חדש
-            </button>
-          )}
         </main>
 
         <aside className="col-aside">
