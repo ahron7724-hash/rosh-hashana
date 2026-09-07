@@ -91,18 +91,6 @@ const Pom = () => (
     <circle cx="14.3" cy="15.6" r="1" fill="var(--surface)" />
   </svg>
 )
-const Ornament = () => (
-  <svg viewBox="0 0 100 100" fill="none" stroke="currentColor" aria-hidden="true">
-    <circle cx="50" cy="54" r="38" strokeWidth="3" />
-    <path d="M50 16c1.6 3.2 4.6 4.4 8 3.2-.9 3.2-3.2 4.8-6 4.8" strokeWidth="3" />
-    <g fill="currentColor" stroke="none">
-      <circle cx="50" cy="46" r="3" /><circle cx="40" cy="52" r="3" /><circle cx="60" cy="52" r="3" />
-      <circle cx="45" cy="62" r="3" /><circle cx="55" cy="62" r="3" /><circle cx="50" cy="72" r="2.6" />
-      <circle cx="34" cy="61" r="2.6" /><circle cx="66" cy="61" r="2.6" /><circle cx="38" cy="44" r="2.6" /><circle cx="62" cy="44" r="2.6" />
-    </g>
-  </svg>
-)
-
 /* ---------------- data normalize ---------------- */
 function normalize(raw) {
   const d = raw || {}
@@ -573,10 +561,35 @@ function ConfirmDialog({ body, onNo, onYes }) {
 }
 
 /* ---------------- rows ---------------- */
-function DishRow({ dish, people, me, onToggleDone, onClaim, onAssign, onEdit, onDelete }) {
-  const [pop, setPop] = useState(false)
-  const anchor = useRef()
-  const owner = people.find((p) => p.id === dish.takenBy) || null
+function RowMenu({ items }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef()
+  return (
+    <>
+      <button className="row-menu" ref={ref} onClick={() => setOpen((v) => !v)} aria-label="עוד אפשרויות">
+        <Dots size={18} />
+      </button>
+      {open && (
+        <Popover anchorRef={ref} onClose={() => setOpen(false)} width={180}>
+          {items.map((it, i) => (
+            <button
+              key={i}
+              className={'popover-item' + (it.danger ? ' danger' : '')}
+              onClick={() => {
+                setOpen(false)
+                it.onClick()
+              }}
+            >
+              {it.icon} {it.label}
+            </button>
+          ))}
+        </Popover>
+      )}
+    </>
+  )
+}
+
+function DishRow({ dish, owner, onToggleDone, onOpenAssign, onEdit, onDelete }) {
   return (
     <div className={'dish' + (dish.done ? ' done' : '')}>
       <button
@@ -585,122 +598,92 @@ function DishRow({ dish, people, me, onToggleDone, onClaim, onAssign, onEdit, on
         aria-pressed={dish.done}
         title={dish.done ? 'בטל סימון' : 'סמן כמוכן'}
       >
-        {dish.done && <Check size={13} />}
+        {dish.done && <Check size={15} />}
       </button>
-      <div className="dish-body">
-        <div className="dish-name">{dish.name}</div>
-        {dish.note && <div className="dish-note">{dish.note}</div>}
-      </div>
-      <div className="dish-assignee" ref={anchor}>
+      <button className="dish-body" onClick={onEdit} title="עריכת המנה">
+        <span className="dish-name">{dish.name}</span>
+        {dish.note && <span className="dish-note">{dish.note}</span>}
+      </button>
+      <button className={'assignee' + (owner ? ' filled' : '')} onClick={onOpenAssign}>
         {owner ? (
-          <button className="pill" onClick={() => setPop((v) => !v)}>
+          <>
             <span className="avatar xs" style={{ background: owner.color }}>{initials(owner.name)}</span>
             <span>{owner.name}</span>
-            <ChevronDown size={13} />
-          </button>
+          </>
         ) : (
-          <div className="assign-wrap">
-            <button className="claim-btn" onClick={onClaim}>אני לוקח/ת</button>
-            <button className="pill ghosty" onClick={() => setPop((v) => !v)} title="שיבוץ לאדם אחר">
-              <ChevronDown size={13} />
-            </button>
-          </div>
+          <span>מי מביא?</span>
         )}
-        {pop && (
-          <Popover anchorRef={anchor} onClose={() => setPop(false)}>
-            <button
-              className={'popover-item' + (!dish.takenBy ? ' on' : '')}
-              onClick={() => {
-                onAssign(null)
-                setPop(false)
-              }}
-            >
-              <span className="dot-empty" /> בלי שיבוץ
-            </button>
-            {people.map((p) => (
-              <button
-                key={p.id}
-                className={'popover-item' + (dish.takenBy === p.id ? ' on' : '')}
-                onClick={() => {
-                  onAssign(p.id)
-                  setPop(false)
-                }}
-              >
-                <span className="avatar xs" style={{ background: p.color }}>{initials(p.name)}</span>
-                {p.name}
-                {me === p.id ? ' (אני)' : ''}
-              </button>
-            ))}
-            {people.length === 0 && <div className="popover-empty">קודם הוסיפו בני משפחה</div>}
-          </Popover>
-        )}
-      </div>
-      <div className="dish-row-tools">
-        <button className="icon-btn" title="עריכה" onClick={onEdit}><Pencil size={14} /></button>
-        <button className="icon-btn danger" title="מחיקה" onClick={onDelete}><Trash size={14} /></button>
-      </div>
+      </button>
+      <RowMenu
+        items={[
+          { icon: <Pencil size={15} />, label: 'עריכה', onClick: onEdit },
+          { icon: <Trash size={15} />, label: 'מחיקה', onClick: onDelete, danger: true },
+        ]}
+      />
     </div>
   )
 }
 
 function CategorySection({
   cat,
+  tint,
   dishes,
   cdone,
   ctot,
-  people,
-  me,
+  peopleById,
   onAddDish,
   onEditCat,
   onDeleteCat,
   onEditDish,
   onDeleteDish,
   onToggleDone,
-  onClaim,
-  onAssign,
+  onOpenAssign,
 }) {
   return (
     <section className="cat">
       <div className="cat-head">
-        <span className="cat-emoji">{cat.emoji}</span>
+        <span className="cat-emoji" data-tint={tint}>{cat.emoji}</span>
         <div className="cat-id">
           <h3 className="cat-title">{cat.name}</h3>
-          <div className="cat-meta">{ctot ? `${cdone}/${ctot} מוכנות` : 'אין עדיין מנות'}</div>
+          <div className="cat-meta">{ctot ? `${cdone} מתוך ${ctot} מוכנות` : 'עדיין ריק'}</div>
         </div>
-        <div className="cat-actions">
-          <button className="icon-btn" title="הוספת מנה" onClick={onAddDish}><Plus size={17} /></button>
-          <button className="icon-btn" title="עריכת נושא" onClick={onEditCat}><Pencil size={15} /></button>
-          <button className="icon-btn danger" title="מחיקת נושא" onClick={onDeleteCat}><Trash size={15} /></button>
-        </div>
+        <RowMenu
+          items={[
+            { icon: <Pencil size={15} />, label: 'עריכת הנושא', onClick: onEditCat },
+            { icon: <Trash size={15} />, label: 'מחיקת הנושא', onClick: onDeleteCat, danger: true },
+          ]}
+        />
       </div>
       <div className="dishes">
-        {dishes.length === 0 && (
-          <div className="dish-empty">
-            עדיין לא הוספתם מנות לנושא הזה — <button className="linkbtn" onClick={onAddDish}>להוסיף מנה</button>
-          </div>
-        )}
         {dishes.map((d) => (
           <DishRow
             key={d.id}
             dish={d}
-            people={people}
-            me={me}
+            owner={d.takenBy ? peopleById[d.takenBy] || null : null}
             onToggleDone={() => onToggleDone(d)}
-            onClaim={() => onClaim(d)}
-            onAssign={(pid) => onAssign(d, pid)}
+            onOpenAssign={() => onOpenAssign(d)}
             onEdit={() => onEditDish(d)}
             onDelete={() => onDeleteDish(d)}
           />
         ))}
+        {dishes.length === 0 && <div className="dish-empty">עדיין אין מנות בנושא הזה</div>}
       </div>
+      <button className="add-dish-btn" onClick={onAddDish}>
+        <Plus size={17} /> הוסיפו מנה
+      </button>
     </section>
   )
 }
 
 function PersonCard({ p, taken, dn, cats, selected, isMe, onSelect, onBeMe, onToggleDone, onEdit, onDelete }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(isMe)
   const catName = (id) => (cats.find((c) => c.id === id) || {}).name || ''
   const list = [...taken].sort(bySort)
+  const menuItems = [
+    ...(isMe ? [] : [{ icon: <UserCheck size={15} />, label: 'זה אני', onClick: onBeMe }]),
+    { icon: <Pencil size={15} />, label: 'עריכה', onClick: onEdit },
+    { icon: <Trash size={15} />, label: 'מחיקה', onClick: onDelete, danger: true },
+  ]
   return (
     <div className={'person' + (selected ? ' sel' : '')}>
       <div className="person-top">
@@ -712,17 +695,11 @@ function PersonCard({ p, taken, dn, cats, selected, isMe, onSelect, onBeMe, onTo
               {isMe && <em className="metag">אני</em>}
             </span>
             <span className="person-count">
-              {taken.length ? `אחראי/ת ל־${taken.length} מנות · הוכנו ${dn}` : 'עדיין לא בחר/ה מנות'}
+              {taken.length ? `${taken.length} מנות · ${dn} מוכנות` : 'עדיין לא בחר/ה'}
             </span>
           </span>
         </button>
-        <div className="person-tools">
-          {!isMe && (
-            <button className="icon-btn" title="זה אני" onClick={onBeMe}><UserCheck size={15} /></button>
-          )}
-          <button className="icon-btn" title="עריכה" onClick={onEdit}><Pencil size={14} /></button>
-          <button className="icon-btn danger" title="מחיקה" onClick={onDelete}><Trash size={14} /></button>
-        </div>
+        <RowMenu items={menuItems} />
       </div>
       {taken.length > 0 && (
         <>
@@ -730,7 +707,7 @@ function PersonCard({ p, taken, dn, cats, selected, isMe, onSelect, onBeMe, onTo
             <i style={{ width: pct(dn, taken.length) + '%', background: p.color }} />
           </div>
           <button className="person-expand" onClick={() => setOpen((o) => !o)}>
-            {open ? 'הסתר' : 'הצג'} רשימה <ChevronDown size={13} className={open ? 'flip' : ''} />
+            {open ? 'הסתר' : 'הצג'} רשימה <ChevronDown size={14} className={open ? 'flip' : ''} />
           </button>
           {open && (
             <div className="checklist">
@@ -741,7 +718,7 @@ function PersonCard({ p, taken, dn, cats, selected, isMe, onSelect, onBeMe, onTo
                     className={'mini' + (d.done ? ' on' : '')}
                     onClick={() => onToggleDone(d)}
                   >
-                    {d.done && <Check size={11} />}
+                    {d.done && <Check size={12} />}
                   </button>
                   <span>{d.name}</span>
                   <em>{catName(d.categoryId)}</em>
@@ -752,6 +729,45 @@ function PersonCard({ p, taken, dn, cats, selected, isMe, onSelect, onBeMe, onTo
         </>
       )}
     </div>
+  )
+}
+
+function AssignDialog({ dish, people, me, onPick, onCancel }) {
+  const meObj = people.find((p) => p.id === me) || null
+  const others = people.filter((p) => p.id !== me)
+  return (
+    <Dialog title={dish.name} onCancel={onCancel}>
+      <p className="dialog-lead">מי מביא את זה?</p>
+      <div className="assign-opts">
+        <button
+          className={'assign-opt me' + (dish.takenBy && dish.takenBy === me ? ' on' : '')}
+          onClick={() => onPick('__me__')}
+        >
+          {meObj ? (
+            <span className="avatar sm" style={{ background: meObj.color }}>{initials(meObj.name)}</span>
+          ) : (
+            <span className="avatar sm ghost">★</span>
+          )}
+          זה אני{meObj ? ` · ${meObj.name}` : ''}
+        </button>
+        {others.map((p) => (
+          <button
+            key={p.id}
+            className={'assign-opt' + (dish.takenBy === p.id ? ' on' : '')}
+            onClick={() => onPick(p.id)}
+          >
+            <span className="avatar sm" style={{ background: p.color }}>{initials(p.name)}</span>
+            {p.name}
+            {dish.takenBy === p.id && <Check size={16} />}
+          </button>
+        ))}
+        {dish.takenBy && (
+          <button className="assign-opt clear" onClick={() => onPick(null)}>
+            הסרת השיבוץ
+          </button>
+        )}
+      </div>
+    </Dialog>
   )
 }
 
@@ -811,19 +827,29 @@ export default function App() {
   )
 
   const meObj = people.find((p) => p.id === me) || null
+  const peopleById = useMemo(() => {
+    const m = {}
+    for (const p of people) m[p.id] = p
+    return m
+  }, [people])
 
   function needIdentity(then) {
     setDialog({ type: 'identity', then })
   }
-  function claimForMe(dish) {
-    if (!me) {
-      needIdentity((pid) => store.updateDish(dish.id, { takenBy: pid }))
-      return
-    }
-    store.updateDish(dish.id, { takenBy: me })
+  function openAssign(dish) {
+    setDialog({ type: 'assign', dish })
   }
-  function setAssignee(dish, pid) {
+  function pickAssignee(dish, pid) {
+    if (pid === '__me__') {
+      if (!me) {
+        setDialog(null)
+        needIdentity((id) => store.updateDish(dish.id, { takenBy: id }))
+        return
+      }
+      pid = me
+    }
     store.updateDish(dish.id, { takenBy: pid })
+    setDialog(null)
   }
   function toggleDone(dish) {
     store.updateDish(dish.id, { done: !dish.done })
@@ -943,7 +969,6 @@ export default function App() {
   return (
     <div className="app">
       <header className="masthead">
-        <div className="masthead-orn"><Ornament /></div>
         <div className="masthead-inner">
           <div className="brand-row">
             <span className="brand-mark"><Pom /></span>
@@ -980,11 +1005,18 @@ export default function App() {
       )}
 
       <div className="stats">
-        <div className="stat"><b>{stats.total}</b><span>מנות</span></div>
-        <div className="stat"><b>{stats.assigned}</b><span>שובצו</span></div>
-        <div className="stat"><b>{stats.done}</b><span>מוכנות</span></div>
-        <div className="bar"><i style={{ width: pctReady + '%' }} /></div>
-        <div className="stat"><b>{pctReady}%</b><span>מהתפריט מוכן</span></div>
+        <p className="stats-line">
+          <b>{stats.assigned}</b> מתוך <b>{stats.total}</b> מנות שובצו
+          {stats.done > 0 && (
+            <>
+              {' · '}
+              <b>{stats.done}</b> כבר מוכנות
+            </>
+          )}
+        </p>
+        <div className="bar">
+          <i style={{ width: pctReady + '%' }} />
+        </div>
       </div>
 
       <div className="page">
@@ -1006,7 +1038,7 @@ export default function App() {
             </div>
           )}
 
-          {cats.map((cat) => {
+          {cats.map((cat, idx) => {
             const all = dishesByCat[cat.id] || []
             let list = all
             if (activePerson) list = all.filter((d) => d.takenBy === activePerson)
@@ -1016,19 +1048,18 @@ export default function App() {
               <CategorySection
                 key={cat.id}
                 cat={cat}
+                tint={idx % 5}
                 dishes={list}
                 cdone={cdone}
                 ctot={all.length}
-                people={people}
-                me={me}
+                peopleById={peopleById}
                 onAddDish={() => setDialog({ type: 'dish', defaultCategoryId: cat.id })}
                 onEditCat={() => setDialog({ type: 'category', editing: cat })}
                 onDeleteCat={() => confirmDelete('category', cat)}
                 onEditDish={(d) => setDialog({ type: 'dish', editing: d })}
                 onDeleteDish={(d) => confirmDelete('dish', d)}
                 onToggleDone={toggleDone}
-                onClaim={claimForMe}
-                onAssign={setAssignee}
+                onOpenAssign={openAssign}
               />
             )
           })}
@@ -1136,6 +1167,15 @@ export default function App() {
             if (dialog.then) dialog.then(id)
             setDialog(null)
           }}
+        />
+      )}
+      {dialog?.type === 'assign' && (
+        <AssignDialog
+          dish={dialog.dish}
+          people={people}
+          me={me}
+          onCancel={() => setDialog(null)}
+          onPick={(pid) => pickAssignee(dialog.dish, pid)}
         />
       )}
       {dialog?.type === 'confirm' && (
