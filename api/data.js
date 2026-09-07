@@ -2,12 +2,12 @@
 // GET  /api/data       -> { rev, data }   (data is null until first write)
 // PUT  /api/data        { data } -> { ok, rev }
 //
-// The whole menu is stored as a single JSON object in Vercel Blob
-// (menu-data.json), read and written only by this function. Works with a
-// public OR a private Blob store. Enable it in the Vercel dashboard:
-// Storage -> Blob -> connect to this project, then redeploy.
+// The whole menu is stored as a single JSON object in a PUBLIC Vercel Blob
+// store (menu-data.json). Writes go only through this function; the store
+// URL is random and unguessable. Enable it in the Vercel dashboard:
+// Storage -> Blob (Public) -> connect to this project, then redeploy.
 
-import { head, list, put } from '@vercel/blob'
+import { list, put } from '@vercel/blob'
 
 const BLOB_PATH = 'menu-data.json'
 
@@ -23,37 +23,6 @@ function resolveToken() {
   return anyKey ? env[anyKey] : ''
 }
 
-async function tryFetchJson(url, token) {
-  if (!url) return null
-  for (const headers of [{}, { authorization: `Bearer ${token}` }]) {
-    try {
-      const r = await fetch(url, { cache: 'no-store', headers })
-      if (r.ok) return await r.json()
-    } catch (e) {}
-  }
-  return null
-}
-
-async function readDoc(token) {
-  const { blobs } = await list({ prefix: BLOB_PATH, limit: 1000, token })
-  const hit = blobs.find((b) => b.pathname === BLOB_PATH)
-  if (!hit) return { rev: 0, data: null }
-
-  // Private stores need a freshly-signed download URL from head().
-  let signed
-  try {
-    const h = await head(hit.url, { token })
-    signed = h && h.downloadUrl
-  } catch (e) {}
-
-  for (const url of [signed, hit.downloadUrl, hit.url]) {
-    const doc = await tryFetchJson(url, token)
-    if (doc) return { rev: doc.rev || 0, data: doc.data ?? null }
-  }
-  const err = new Error('blob-read-failed')
-  throw err
-}
-
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
@@ -64,8 +33,13 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      const { rev, data } = await readDoc(token)
-      return res.status(200).json({ rev, data: data ?? null })
+      const { blobs } = await list({ prefix: BLOB_PATH, limit: 100, token })
+      const hit = blobs.find((b) => b.pathname === BLOB_PATH)
+      if (!hit) return res.status(200).json({ rev: 0, data: null })
+      const r = await fetch(hit.downloadUrl || hit.url, { cache: 'no-store' })
+      if (!r.ok) return res.status(200).json({ rev: 0, data: null })
+      const doc = await r.json()
+      return res.status(200).json({ rev: doc.rev || 0, data: doc.data ?? null })
     }
 
     if (req.method === 'PUT' || req.method === 'POST') {
@@ -76,7 +50,7 @@ export default async function handler(req, res) {
       }
       const rev = Date.now()
       await put(BLOB_PATH, JSON.stringify({ rev, data }), {
-        access: 'private',
+        access: 'public',
         contentType: 'application/json',
         addRandomSuffix: false,
         allowOverwrite: true,
