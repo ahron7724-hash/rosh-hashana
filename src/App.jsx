@@ -15,7 +15,7 @@ const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0)
 const bySort = (a, b) => (a.order ?? 0) - (b.order ?? 0)
 const uid = () => 'x' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-3)
 
-/* Starter menu — used only when there is nothing saved yet. */
+/* Starter menu — used when nothing is saved yet, and by "טעינת התפריט מחדש". */
 const STARTER = {
   people: [
     { id: 'p1', name: 'אמא', color: '#a83440', order: 1 },
@@ -23,35 +23,54 @@ const STARTER = {
     { id: 'p3', name: 'סבתא', color: '#5f7344', order: 3 },
   ],
   categories: [
-    { id: 'c1', name: 'סימני החג', emoji: '🍎', order: 1 },
-    { id: 'c2', name: 'סלטים ומטבלים', emoji: '🥗', order: 2 },
-    { id: 'c3', name: 'מרקים ופתיחה', emoji: '🍲', order: 3 },
-    { id: 'c4', name: 'מנות עיקריות', emoji: '🍗', order: 4 },
-    { id: 'c5', name: 'קינוחים', emoji: '🍰', order: 5 },
+    { id: 'c1', name: 'סימנים', emoji: '🍎', order: 1 },
+    { id: 'c2', name: 'עוגות וקינוחים', emoji: '🍰', order: 2 },
+    { id: 'c3', name: 'סלטים', emoji: '🥗', order: 3 },
+    { id: 'c4', name: 'סעודת שבת וחג', emoji: '🐟', order: 4 },
+    { id: 'c5', name: 'סעודה שנייה', emoji: '🍲', order: 5 },
+    { id: 'c6', name: 'סעודה שלישית', emoji: '🥗', order: 6 },
+    { id: 'c7', name: 'סעודת חג', emoji: '🍗', order: 7 },
+    { id: 'c8', name: 'סעודת יום', emoji: '🥘', order: 8 },
+    { id: 'c9', name: 'תוספות', emoji: '🍚', order: 9 },
   ],
   dishes: [
-    { id: 'd1', categoryId: 'c1', name: 'תפוח בדבש', note: '', takenBy: 'p1', done: false, order: 1 },
-    { id: 'd2', categoryId: 'c1', name: 'רימון', note: '', takenBy: null, done: false, order: 2 },
-    { id: 'd3', categoryId: 'c1', name: 'תמרים', note: '', takenBy: null, done: false, order: 3 },
-    { id: 'd4', categoryId: 'c1', name: 'ראש דג', note: 'שיהיו לראש ולא לזנב', takenBy: null, done: false, order: 4 },
-    { id: 'd5', categoryId: 'c1', name: 'קרא (דלעת) בדבש', note: '', takenBy: null, done: false, order: 5 },
-    { id: 'd6', categoryId: 'c2', name: 'סלט סלק אפוי ותפוחים', note: '', takenBy: null, done: false, order: 1 },
-    { id: 'd7', categoryId: 'c2', name: 'גזר מרוקאי חריף', note: '', takenBy: null, done: false, order: 2 },
-    { id: 'd8', categoryId: 'c2', name: 'מטבוחה', note: '', takenBy: null, done: false, order: 3 },
-    { id: 'd9', categoryId: 'c2', name: 'טחינה גולמית', note: '', takenBy: null, done: false, order: 4 },
-    { id: 'd10', categoryId: 'c2', name: 'סלט חסה עם פלחי רימון', note: '', takenBy: null, done: false, order: 5 },
-    { id: 'd11', categoryId: 'c3', name: 'מרק עוף עם קניידלך', note: 'סיר גדול', takenBy: 'p3', done: false, order: 1 },
-    { id: 'd12', categoryId: 'c3', name: 'מרק ירקות שורש', note: '', takenBy: null, done: false, order: 2 },
-    { id: 'd13', categoryId: 'c3', name: 'קציצות דג במרוקאי', note: '', takenBy: null, done: false, order: 3 },
-    { id: 'd14', categoryId: 'c4', name: 'עוף צלוי בדבש ושזיפים', note: '', takenBy: null, done: false, order: 1 },
-    { id: 'd15', categoryId: 'c4', name: 'צלי בקר ביין אדום', note: '', takenBy: null, done: false, order: 2 },
-    { id: 'd16', categoryId: 'c4', name: 'אורז עם שקדים וצימוקים', note: '', takenBy: null, done: false, order: 3 },
-    { id: 'd17', categoryId: 'c4', name: 'תפוחי אדמה מוזהבים', note: '', takenBy: null, done: false, order: 4 },
-    { id: 'd18', categoryId: 'c4', name: 'שעועית ירוקה בשום', note: '', takenBy: null, done: false, order: 5 },
-    { id: 'd19', categoryId: 'c5', name: 'עוגת דבש', note: '', takenBy: 'p1', done: false, order: 1 },
-    { id: 'd20', categoryId: 'c5', name: 'עוגת תפוחים', note: '', takenBy: null, done: false, order: 2 },
-    { id: 'd21', categoryId: 'c5', name: 'פירות העונה', note: '', takenBy: null, done: false, order: 3 },
-    { id: 'd22', categoryId: 'c5', name: 'טייגלך', note: 'עוגיות בצק בדבש', takenBy: null, done: false, order: 4 },
+    { id: 'd1', categoryId: 'c1', name: 'קציצות סילקא', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd2', categoryId: 'c1', name: 'קציצות קרא (דלעת)', note: '', takenBy: null, done: false, order: 2 },
+    { id: 'd3', categoryId: 'c1', name: 'רוביה', note: '', takenBy: null, done: false, order: 3 },
+    { id: 'd4', categoryId: 'c1', name: 'ראש של דג', note: '', takenBy: null, done: false, order: 4 },
+    { id: 'd5', categoryId: 'c1', name: 'רימון', note: '', takenBy: null, done: false, order: 5 },
+    { id: 'd6', categoryId: 'c2', name: 'עוגיות תמרים', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd7', categoryId: 'c2', name: 'עוגת דבש', note: '', takenBy: null, done: false, order: 2 },
+    { id: 'd8', categoryId: 'c2', name: 'אלפחורס', note: '', takenBy: null, done: false, order: 3 },
+    { id: 'd9', categoryId: 'c2', name: 'טים טאם', note: '', takenBy: null, done: false, order: 4 },
+    { id: 'd10', categoryId: 'c2', name: 'קונוסים / קרם שניט', note: '', takenBy: null, done: false, order: 5 },
+    { id: 'd11', categoryId: 'c2', name: 'עוגת שכבות תפוחים / קרמל', note: '', takenBy: null, done: false, order: 6 },
+    { id: 'd12', categoryId: 'c2', name: 'שוגי לנוקי', note: '', takenBy: null, done: false, order: 7 },
+    { id: 'd13', categoryId: 'c2', name: 'קוקילידות', note: '', takenBy: null, done: false, order: 8 },
+    { id: 'd14', categoryId: 'c3', name: 'סלט ביצים', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd15', categoryId: 'c3', name: 'חציל עם פלפלים ובצל', note: '', takenBy: null, done: false, order: 2 },
+    { id: 'd16', categoryId: 'c3', name: 'חציל של לאה', note: '', takenBy: null, done: false, order: 3 },
+    { id: 'd17', categoryId: 'c3', name: 'חציל קונפי', note: '', takenBy: null, done: false, order: 4 },
+    { id: 'd18', categoryId: 'c3', name: 'מטבוחה', note: '', takenBy: null, done: false, order: 5 },
+    { id: 'd19', categoryId: 'c3', name: 'חציל מצופה פירורים', note: '', takenBy: null, done: false, order: 6 },
+    { id: 'd20', categoryId: 'c3', name: 'טחינה', note: '', takenBy: null, done: false, order: 7 },
+    { id: 'd21', categoryId: 'c3', name: 'אבוקדו', note: '', takenBy: null, done: false, order: 8 },
+    { id: 'd22', categoryId: 'c3', name: 'גזר', note: '', takenBy: null, done: false, order: 9 },
+    { id: 'd23', categoryId: 'c3', name: 'סלט חי', note: '', takenBy: null, done: false, order: 10 },
+    { id: 'd24', categoryId: 'c3', name: 'פטריות', note: '', takenBy: null, done: false, order: 11 },
+    { id: 'd25', categoryId: 'c3', name: 'סלט כבד', note: '', takenBy: null, done: false, order: 12 },
+    { id: 'd26', categoryId: 'c4', name: 'הליבוט', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd27', categoryId: 'c4', name: 'קרפיון', note: '', takenBy: null, done: false, order: 2 },
+    { id: 'd28', categoryId: 'c4', name: 'פרוסות בשר – צלי', note: '', takenBy: null, done: false, order: 3 },
+    { id: 'd29', categoryId: 'c5', name: 'חמין', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd30', categoryId: 'c5', name: 'ברוסקטות כבד', note: '', takenBy: null, done: false, order: 2 },
+    { id: 'd31', categoryId: 'c6', name: 'דגים + סלטים', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd32', categoryId: 'c7', name: 'קבבים עם בצל מקורמל', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd33', categoryId: 'c7', name: 'פרגיות ממולאות / קונכיות עם פרגית', note: '', takenBy: null, done: false, order: 2 },
+    { id: 'd34', categoryId: 'c8', name: 'בשר ראש וקוסקוס', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd35', categoryId: 'c8', name: 'כל מה שנשאר', note: '', takenBy: null, done: false, order: 2 },
+    { id: 'd36', categoryId: 'c9', name: 'מקלובה', note: '', takenBy: null, done: false, order: 1 },
+    { id: 'd37', categoryId: 'c9', name: 'קוסקוס', note: '', takenBy: null, done: false, order: 2 },
   ],
 }
 
@@ -295,6 +314,9 @@ function createStore(onMode) {
     },
     importAll(payload) {
       commit(normalize(payload))
+    },
+    resetToStarter() {
+      commit(normalize(STARTER))
     },
     clearAll() {
       commit({ categories: [], dishes: [], people: [] })
@@ -949,6 +971,19 @@ export default function App() {
       },
     })
   }
+  function handleResetStarter() {
+    setMenuOpen(false)
+    setDialog({
+      type: 'confirm',
+      body: 'לטעון מחדש את התפריט המלא? זה יחליף את כל מה שיש עכשיו (כולל שיבוצים).',
+      onYes: () => {
+        store.resetToStarter()
+        setMe(null)
+        setToast('התפריט נטען')
+        setDialog(null)
+      },
+    })
+  }
   function handleClear() {
     setMenuOpen(false)
     setDialog({
@@ -997,9 +1032,10 @@ export default function App() {
       </header>
 
       {menuOpen && (
-        <Popover anchorRef={menuBtnRef} onClose={() => setMenuOpen(false)} width={200}>
+        <Popover anchorRef={menuBtnRef} onClose={() => setMenuOpen(false)} width={210}>
           <button className="popover-item" onClick={handleExport}><Download size={15} /> ייצוא לקובץ</button>
           <button className="popover-item" onClick={handleImportClick}><Upload size={15} /> ייבוא מקובץ</button>
+          <button className="popover-item" onClick={handleResetStarter}><Sparkle size={15} /> טעינת התפריט המלא</button>
           <button className="popover-item danger" onClick={handleClear}><Trash size={15} /> איפוס התפריט</button>
         </Popover>
       )}
