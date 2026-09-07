@@ -3,17 +3,16 @@
 // PUT  /api/data        { data } -> { ok, rev }
 //
 // The whole menu is stored as a single JSON object in Vercel Blob
-// (menu-data.json), read and written only by this function. Enable it in the
-// Vercel dashboard: Storage -> Blob -> connect to this project, then redeploy.
-// Until then the app runs in local mode (localStorage) on its own.
+// (menu-data.json), read and written only by this function. Works with a
+// public OR a private Blob store. Enable it in the Vercel dashboard:
+// Storage -> Blob -> connect to this project, then redeploy.
 
-import { list, put } from '@vercel/blob'
+import { head, list, put } from '@vercel/blob'
 
 const BLOB_PATH = 'menu-data.json'
 
 // Vercel names the Blob token BLOB_READ_WRITE_TOKEN by default, but a
 // non-default store prefix produces e.g. rosh_hashana_blob_READ_WRITE_TOKEN.
-// Accept whichever one exists.
 function resolveToken() {
   const env = process.env
   if (env.BLOB_READ_WRITE_TOKEN) return env.BLOB_READ_WRITE_TOKEN
@@ -24,20 +23,35 @@ function resolveToken() {
   return anyKey ? env[anyKey] : ''
 }
 
+async function tryFetchJson(url, token) {
+  if (!url) return null
+  for (const headers of [{}, { authorization: `Bearer ${token}` }]) {
+    try {
+      const r = await fetch(url, { cache: 'no-store', headers })
+      if (r.ok) return await r.json()
+    } catch (e) {}
+  }
+  return null
+}
+
 async function readDoc(token) {
-  const { blobs } = await list({ prefix: BLOB_PATH, limit: 100, token })
+  const { blobs } = await list({ prefix: BLOB_PATH, limit: 1000, token })
   const hit = blobs.find((b) => b.pathname === BLOB_PATH)
   if (!hit) return { rev: 0, data: null }
-  // downloadUrl is a fresh, directly-fetchable link (signed for private stores).
-  const target = hit.downloadUrl || hit.url
-  const r = await fetch(target, { cache: 'no-store' })
-  if (!r.ok) {
-    const err = new Error('blob-read-' + r.status)
-    err.status = r.status
-    throw err
+
+  // Private stores need a freshly-signed download URL from head().
+  let signed
+  try {
+    const h = await head(hit.url, { token })
+    signed = h && h.downloadUrl
+  } catch (e) {}
+
+  for (const url of [signed, hit.downloadUrl, hit.url]) {
+    const doc = await tryFetchJson(url, token)
+    if (doc) return { rev: doc.rev || 0, data: doc.data ?? null }
   }
-  const doc = await r.json()
-  return { rev: doc.rev || 0, data: doc.data ?? null }
+  const err = new Error('blob-read-failed')
+  throw err
 }
 
 export default async function handler(req, res) {
