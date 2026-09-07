@@ -30,6 +30,27 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
   const token = resolveToken()
+
+  // Diagnostics: /api/data?debug=1
+  if (req.method === 'GET' && req.query && req.query.debug === '1') {
+    const envKeys = Object.keys(process.env).filter((k) => /BLOB|READ_WRITE_TOKEN|KV_|UPSTASH|REDIS/i.test(k))
+    const out = { envKeys, tokenFound: !!token, tokenHead: token ? token.slice(0, 32) : null, write: 'skipped' }
+    if (token) {
+      for (const access of ['public', 'private']) {
+        try {
+          await put('debug-' + access + '.json', JSON.stringify({ t: Date.now() }), {
+            access, contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true, token,
+          })
+          out.write = 'ok:' + access
+          break
+        } catch (e) {
+          out.write = 'fail:' + access + ':' + String((e && e.message) || e)
+        }
+      }
+    }
+    return res.status(200).json(out)
+  }
+
   if (!token) {
     return res.status(501).json({ error: 'blob-not-configured' })
   }
