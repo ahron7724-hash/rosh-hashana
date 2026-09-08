@@ -15,6 +15,24 @@ const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0)
 const bySort = (a, b) => (a.order ?? 0) - (b.order ?? 0)
 const uid = () => 'x' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-3)
 
+const relTime = (ts) => {
+  if (!ts) return ''
+  const m = Math.round((Date.now() - ts) / 60000)
+  if (m < 1) return 'עכשיו'
+  if (m < 60) return `לפני ${m} דק׳`
+  const h = Math.round(m / 60)
+  if (h < 24) return h === 1 ? 'לפני שעה' : h === 2 ? 'לפני שעתיים' : `לפני ${h} שעות`
+  const d = Math.round(h / 24)
+  if (d === 1) return 'אתמול'
+  if (d === 2) return 'לפני יומיים'
+  if (d < 7) return `לפני ${d} ימים`
+  try {
+    return new Date(ts).toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
+  } catch (e) {
+    return ''
+  }
+}
+
 /* Starter menu — used when nothing is saved yet, and by "טעינת התפריט מחדש". */
 const STARTER = {
   people: [
@@ -106,6 +124,7 @@ const Grip = (p) => (
 const Download = (p) => <svg {...base(p)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
 const Upload = (p) => <svg {...base(p)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
 const Sparkle = (p) => <svg {...base(p)} fill="currentColor" stroke="none"><path d="M12 2l1.9 5.6L19.5 9l-4.6 3.3L16 18l-4-3.3L8 18l1.1-5.7L4.5 9l5.6-1.4Z" /></svg>
+const Megaphone = (p) => <svg {...base(p)}><path d="m3 11 18-5v12L3 14v-3z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" /></svg>
 
 const Pom = () => (
   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -121,7 +140,13 @@ const Pom = () => (
 function normalize(raw) {
   const d = raw || {}
   const arr = (x) => (Array.isArray(x) ? x : [])
+  const ann = d.announcement || {}
   return {
+    announcement: {
+      text: String(ann.text || ''),
+      by: String(ann.by || ''),
+      at: Number(ann.at) || 0,
+    },
     categories: arr(d.categories).map((c, i) => ({
       id: String(c.id || uid()),
       name: String(c.name || 'נושא'),
@@ -194,13 +219,27 @@ function sbFetch(path, opts = {}) {
 }
 const sbOk = (r) => (r.ok ? r : Promise.reject(new Error(r.status)))
 
+function annFromRows(rows) {
+  const row = (Array.isArray(rows) ? rows : []).find((r) => r.key === 'announcement')
+  if (!row) return { text: '', by: '', at: 0 }
+  try {
+    const v = JSON.parse(row.value)
+    return { text: String(v.text || ''), by: String(v.by || ''), at: Number(v.at) || 0 }
+  } catch (e) {
+    return { text: String(row.value || ''), by: '', at: 0 }
+  }
+}
+
 async function sbSelectAll() {
-  const [c, p, d] = await Promise.all([
+  const [c, p, d, s] = await Promise.all([
     sbFetch('categories?select=*').then(sbOk).then((r) => r.json()),
     sbFetch('people?select=*').then(sbOk).then((r) => r.json()),
     sbFetch('dishes?select=*').then(sbOk).then((r) => r.json()),
+    // settings is optional — a menu made before this table existed still works
+    sbFetch('settings?select=*').then(sbOk).then((r) => r.json()).catch(() => []),
   ])
   return {
+    announcement: annFromRows(s),
     categories: c.map(catFromRow).sort(bySort),
     people: p.map(personFromRow).sort(bySort),
     dishes: d.map(dishFromRow).sort(bySort),
@@ -317,6 +356,7 @@ function createStore(onMode) {
   }
   function replaceAll(payload) {
     const s = normalize(payload)
+    s.announcement = state.announcement // a family message isn't menu data — keep it
     setState(s)
     if (mode !== 'db') return
     write(deleteAll().then(() => insertAll(s)))
@@ -460,6 +500,17 @@ function createStore(onMode) {
           .then(() => sbFetch(`people?id=eq.${id}`, { method: 'DELETE' }).then(sbOk)),
       )
     },
+    setAnnouncement(text, by) {
+      const ann = { text: String(text || '').trim(), by: String(by || ''), at: Date.now() }
+      local((s) => ({ ...s, announcement: ann }))
+      write(
+        sbFetch('settings?on_conflict=key', {
+          method: 'POST',
+          headers: { prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ key: 'announcement', value: JSON.stringify(ann) }),
+        }).then(sbOk),
+      )
+    },
     importAll(payload) {
       replaceAll(payload)
     },
@@ -467,7 +518,7 @@ function createStore(onMode) {
       replaceAll(STARTER)
     },
     clearAll() {
-      setState({ categories: [], dishes: [], people: [] })
+      setState({ categories: [], dishes: [], people: [], announcement: state.announcement })
       if (mode === 'db') write(deleteAll())
     },
   }
@@ -1138,6 +1189,103 @@ function AssignDialog({ dish, people, me, onPick, onCancel }) {
   )
 }
 
+/* ---------------- announcement bar ----------------
+ * One shared message pinned above the menu. Anyone can edit it; the text is
+ * synced through the `settings` table (key `announcement`) like the rest of
+ * the menu, so everyone on the link sees the same note.
+ */
+function AnnouncementBar({ announcement, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const taRef = useRef()
+  const has = !!announcement.text
+
+  useEffect(() => {
+    if (!editing) return
+    const el = taRef.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [editing])
+
+  const open = () => {
+    setDraft(announcement.text)
+    setEditing(true)
+  }
+  const save = () => {
+    onSave(draft)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div className="notice">
+        <div className="notice-inner is-editing">
+          <span className="notice-ic"><Megaphone size={18} /></span>
+          <div className="notice-body">
+            <textarea
+              ref={taRef}
+              className="notice-ta"
+              value={draft}
+              rows={2}
+              placeholder="למשל: השנה אצל סבתא, מתחילים ב-19:00. מי שיכול — להביא כיסאות מתקפלים."
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save()
+                if (e.key === 'Escape') setEditing(false)
+              }}
+            />
+            <div className="notice-foot">
+              {has && (
+                <button
+                  className="linkbtn notice-clear"
+                  onClick={() => {
+                    onSave('')
+                    setEditing(false)
+                  }}
+                >
+                  מחיקת ההודעה
+                </button>
+              )}
+              <button className="btn ghost" onClick={() => setEditing(false)}>ביטול</button>
+              <button className="btn primary" onClick={save}>{has ? 'שמירה' : 'פרסום'}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!has) {
+    return (
+      <div className="notice empty">
+        <button className="notice-inner" onClick={open}>
+          <span className="notice-ic"><Megaphone size={18} /></span>
+          <span className="notice-add">הוספת הודעה למשפחה — תופיע כאן לכל מי שנכנס לקישור</span>
+          <Pencil size={15} className="notice-pen" />
+        </button>
+      </div>
+    )
+  }
+
+  const meta = [announcement.by && `עודכן ע״י ${announcement.by}`, relTime(announcement.at)]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <div className="notice">
+      <div className="notice-inner">
+        <span className="notice-ic"><Megaphone size={18} /></span>
+        <div className="notice-body">
+          <div className="notice-text">{announcement.text}</div>
+          {meta && <div className="notice-meta">{meta}</div>}
+        </div>
+        <button className="notice-edit" onClick={open} aria-label="עריכת ההודעה"><Pencil size={15} /></button>
+      </div>
+    </div>
+  )
+}
+
 /* ---------------- App ---------------- */
 export default function App() {
   const [mode, setMode] = useState('local')
@@ -1391,6 +1539,11 @@ export default function App() {
           <button className="popover-item danger" onClick={handleClear}><Trash size={15} /> איפוס התפריט</button>
         </Popover>
       )}
+
+      <AnnouncementBar
+        announcement={data.announcement}
+        onSave={(text) => store.setAnnouncement(text, meObj?.name || '')}
+      />
 
       <div className="stats">
         <p className="stats-line">

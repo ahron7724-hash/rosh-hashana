@@ -89,6 +89,52 @@ button{ font-family:inherit; color:inherit }
 .bar{ height:10px; border-radius:999px; background:var(--surface-2); overflow:hidden; box-shadow:inset 0 1px 3px rgba(0,0,0,.05) }
 .bar i{ display:block; height:100%; border-radius:999px; background:linear-gradient(90deg,var(--honey),var(--pom)); transition:width .55s cubic-bezier(.4,0,.2,1) }
 
+/* ---------- announcement ---------- */
+.notice{ max-width:1320px; margin:0 auto; width:100%; padding:16px 32px 0 }
+.notice-inner{
+  display:flex; align-items:flex-start; gap:12px; width:100%; text-align:start;
+  background:color-mix(in srgb, var(--honey) 15%, var(--surface));
+  border:1px solid color-mix(in srgb, var(--honey) 38%, var(--line));
+  border-radius:15px; padding:13px 15px;
+}
+.notice-ic{ flex:none; color:var(--honey); margin-top:1px }
+.notice-body{ flex:1; min-width:0 }
+.notice-text{
+  font-size:14.5px; line-height:1.6; font-weight:500; color:var(--ink);
+  white-space:pre-wrap; overflow-wrap:anywhere;
+}
+.notice-meta{ font-size:11.5px; color:var(--muted); margin-top:5px }
+.notice-edit{
+  flex:none; width:30px; height:30px; display:grid; place-items:center; border:0;
+  background:transparent; border-radius:9px; color:var(--muted); cursor:pointer;
+  transition:background .14s, color .14s;
+}
+.notice-edit:hover{ background:color-mix(in srgb, var(--honey) 22%, transparent); color:var(--ink) }
+
+.notice.empty .notice-inner{
+  align-items:center; background:transparent; border-style:dashed; border-color:var(--line-strong);
+  cursor:pointer; font:inherit; transition:border-color .14s, background .14s;
+}
+.notice.empty .notice-inner:hover{
+  border-color:color-mix(in srgb, var(--honey) 55%, transparent);
+  background:color-mix(in srgb, var(--honey) 8%, var(--surface));
+}
+.notice.empty .notice-ic{ color:var(--muted) }
+.notice.empty .notice-inner:hover .notice-ic{ color:var(--honey) }
+.notice-add{ flex:1; font-size:13.5px; font-weight:600; color:var(--muted) }
+.notice-pen{ flex:none; color:var(--muted) }
+
+.notice-ta{
+  width:100%; border:1.5px solid color-mix(in srgb, var(--honey) 45%, var(--line));
+  border-radius:11px; background:var(--surface); color:var(--ink);
+  font:inherit; font-size:14.5px; line-height:1.6; padding:10px 12px; resize:vertical; min-height:58px;
+}
+.notice-ta:focus{ outline:none; border-color:var(--honey) }
+.notice-foot{ display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:9px }
+.notice-foot .btn{ padding:8px 15px; font-size:13px }
+.notice-clear{ margin-inline-end:auto; color:var(--muted) }
+.notice-clear:hover{ color:var(--pom) }
+
 /* ---------- layout ---------- */
 .page{
   flex:1; max-width:1320px; margin:0 auto; width:100%;
@@ -100,6 +146,7 @@ button{ font-family:inherit; color:inherit }
   .page{ padding:14px 14px 48px }
   .masthead-inner{ padding:20px 16px 18px }
   .stats{ padding:16px 16px 8px }
+  .notice{ padding:14px 16px 0 }
   .dish{ gap:6px; padding:12px 6px }
   .dishes{ padding:2px 4px }
   .sort-handle.sort-handle-sm{ width:18px; margin-inline-start:-2px }

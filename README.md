@@ -54,10 +54,15 @@ create table if not exists dishes (
   done boolean not null default false,
   pos double precision not null default 0
 );
+create table if not exists settings (
+  key text primary key,
+  value text not null default ''
+);
 
 alter table categories enable row level security;
 alter table people    enable row level security;
 alter table dishes    enable row level security;
+alter table settings  enable row level security;
 
 create policy "family read"  on categories for select using (true);
 create policy "family write" on categories for all    using (true) with check (true);
@@ -65,7 +70,13 @@ create policy "family read2" on people     for select using (true);
 create policy "family write2" on people    for all    using (true) with check (true);
 create policy "family read3" on dishes     for select using (true);
 create policy "family write3" on dishes    for all    using (true) with check (true);
+create policy "family read4" on settings   for select using (true);
+create policy "family write4" on settings  for all    using (true) with check (true);
 ```
+
+*(טבלת `settings` מחזיקה את **באנר ההודעות** שבראש הדף — הודעה משותפת אחת שכל אחד
+יכול לערוך. מנה שנוצרה לפני שהטבלה קיימת ממשיכה לעבוד; הבאנר פשוט יישאר ריק עד
+שמריצים את השורות האלה.)*
 
 *(המדיניות מתירה לכל מי שיש לו הקישור לקרוא ולכתוב — מתאים לתפריט משפחתי.
 המפתח הציבורי לא נותן גישה לשום דבר אחר בפרויקט.)*
