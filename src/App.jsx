@@ -139,6 +139,24 @@ function normalize(raw) {
   }
 }
 
+// Union by id — items present on both sides take the local version, items on
+// only one side are kept. Prevents concurrent additions from clobbering.
+function mergeById(serverArr, localArr) {
+  const m = new Map()
+  for (const x of serverArr) m.set(x.id, x)
+  for (const x of localArr) m.set(x.id, x)
+  return [...m.values()]
+}
+function mergeState(server, local) {
+  const categories = mergeById(server.categories, local.categories)
+  const catIds = new Set(categories.map((c) => c.id))
+  return {
+    categories,
+    dishes: mergeById(server.dishes, local.dishes).filter((d) => catIds.has(d.categoryId)),
+    people: mergeById(server.people, local.people),
+  }
+}
+
 /* ---------------- store ----------------
  * One shared JSON "file" in the cloud (Vercel Blob, via /api/data) when it's
  * configured; otherwise falls back to this browser's localStorage. Either way
@@ -195,6 +213,22 @@ function createStore(onMode) {
 
   async function push() {
     if (dead || mode !== 'remote') return
+
+    // If another device wrote since our last sync, merge their state under
+    // ours (union by id) so concurrent additions are never lost.
+    try {
+      const r0 = await fetch(API, { cache: 'no-store' })
+      if (r0.ok) {
+        const j0 = await r0.json()
+        if (j0 && j0.data && j0.rev > lastRev) {
+          state = mergeState(normalize(j0.data), state)
+          lastRev = j0.rev
+          saveLocal()
+          emit()
+        }
+      }
+    } catch (e) {}
+
     const snap = state
     try {
       const r = await fetch(API, {
