@@ -100,6 +100,10 @@ button{ font-family:inherit; color:inherit }
   .page{ padding:14px 14px 48px }
   .masthead-inner{ padding:20px 16px 18px }
   .stats{ padding:16px 16px 8px }
+  .dish{ gap:6px; padding:12px 6px }
+  .dishes{ padding:2px 4px }
+  .sort-handle.sort-handle-sm{ width:18px; margin-inline-start:-2px }
+  .cat-head{ gap:10px }
 }
 
 .filterbar{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; font-size:14px; color:var(--muted) }
@@ -168,6 +172,49 @@ button{ font-family:inherit; color:inherit }
   transition:background .14s, color .14s;
 }
 .row-menu:hover{ background:var(--surface-2); color:var(--ink) }
+
+/* ---------- drag to reorder ---------- */
+.sort-handle{
+  flex:none; width:28px; height:36px; display:grid; place-items:center;
+  border:0; background:transparent; border-radius:9px; cursor:grab;
+  color:var(--line-strong); touch-action:none; -webkit-tap-highlight-color:transparent;
+  transition:background .14s, color .14s;
+}
+.sort-handle:hover{ background:var(--surface-2); color:var(--muted) }
+.sort-handle:active{ cursor:grabbing }
+.sort-handle.sort-handle-sm{ width:22px; height:30px; margin-inline-start:-4px }
+.cat-head .sort-handle.cat-drag{ margin-inline-start:-6px }
+.cat:hover .sort-handle.cat-drag,
+.dish:hover .sort-handle.sort-handle-sm{ color:var(--muted) }
+
+.cat,
+.dish{ position:relative }
+
+/* the original row, left in place (dimmed) while its copy is dragged */
+.sort-ghost{ opacity:.34 }
+
+/* the floating copy that follows the pointer */
+.sort-clone{
+  border-radius:var(--r); overflow:hidden; opacity:.96;
+  box-shadow:0 24px 54px rgba(84,52,28,.26);
+  transition:none;
+}
+.dish.sort-clone{ background:var(--surface); border-radius:14px; box-shadow:0 18px 38px rgba(84,52,28,.2) }
+
+/* line marking where the row will drop (kept inside the box: .cat clips overflow) */
+.drop-before::after,
+.drop-after::after{
+  content:''; position:absolute; inset-inline:3px; height:4px; border-radius:4px;
+  background:var(--pom); z-index:26; pointer-events:none;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--pom) 22%, transparent);
+}
+.drop-before::after{ inset-block-start:1px }
+.drop-after::after{ inset-block-end:1px }
+.dish.drop-before::after,
+.dish.drop-after::after{ inset-inline:6px }
+
+body.sorting-active{ cursor:grabbing; user-select:none; -webkit-user-select:none }
+body.sorting-active .sort-handle{ cursor:grabbing }
 
 .add-dish-btn{
   width:100%; display:flex; align-items:center; justify-content:center; gap:7px;

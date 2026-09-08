@@ -96,6 +96,13 @@ const ChevronDown = (p) => <svg {...base(p)}><polyline points="6 9 12 15 18 9" /
 const Users = (p) => <svg {...base(p)}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
 const UserCheck = (p) => <svg {...base(p)}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><polyline points="17 11 19 13 23 9" /></svg>
 const Dots = (p) => <svg {...base(p)} fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg>
+const Grip = (p) => (
+  <svg {...base(p)} fill="currentColor" stroke="none">
+    <circle cx="9" cy="5" r="1.5" /><circle cx="15" cy="5" r="1.5" />
+    <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+    <circle cx="9" cy="19" r="1.5" /><circle cx="15" cy="19" r="1.5" />
+  </svg>
+)
 const Download = (p) => <svg {...base(p)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
 const Upload = (p) => <svg {...base(p)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
 const Sparkle = (p) => <svg {...base(p)} fill="currentColor" stroke="none"><path d="M12 2l1.9 5.6L19.5 9l-4.6 3.3L16 18l-4-3.3L8 18l1.1-5.7L4.5 9l5.6-1.4Z" /></svg>
@@ -399,6 +406,37 @@ function createStore(onMode) {
       local((s) => ({ ...s, dishes: s.dishes.filter((x) => x.id !== id) }))
       write(sbFetch(`dishes?id=eq.${id}`, { method: 'DELETE' }).then(sbOk))
     },
+    reorderCategories(orderedIds) {
+      const changed = []
+      local((s) => ({
+        ...s,
+        categories: s.categories.map((c) => {
+          const i = orderedIds.indexOf(c.id)
+          if (i === -1 || (c.order ?? 0) === i + 1) return c
+          changed.push([c.id, i + 1])
+          return { ...c, order: i + 1 }
+        }),
+      }))
+      changed.forEach(([id, pos]) =>
+        write(sbFetch(`categories?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ pos }) }).then(sbOk)),
+      )
+    },
+    reorderDishes(categoryId, orderedIds) {
+      const changed = []
+      local((s) => ({
+        ...s,
+        dishes: s.dishes.map((d) => {
+          if (d.categoryId !== categoryId) return d
+          const i = orderedIds.indexOf(d.id)
+          if (i === -1 || (d.order ?? 0) === i + 1) return d
+          changed.push([d.id, i + 1])
+          return { ...d, order: i + 1 }
+        }),
+      }))
+      changed.forEach(([id, pos]) =>
+        write(sbFetch(`dishes?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ pos }) }).then(sbOk)),
+      )
+    },
     addPerson(d) {
       const id = uid()
       const p = { id, name: d.name, color: d.color, order: d.order ?? Date.now() }
@@ -693,6 +731,179 @@ function ConfirmDialog({ body, onNo, onYes }) {
   )
 }
 
+/* ---------------- drag to reorder ----------------
+ * Pointer-based vertical sorting (works with mouse and touch). On pick-up a
+ * floating copy of the row follows the pointer while the original stays put
+ * as a dimmed placeholder, so the layout never jumps regardless of how tall
+ * the rows are. A coloured line shows where the row will land. Nothing is
+ * reordered until the drop, when `onReorder` is called with the new id order.
+ * The page auto-scrolls near the viewport edges.
+ */
+function useSortable(ids, onReorder, enabled = true) {
+  const [draggingId, setDraggingId] = useState(null)
+  const cfg = useRef({ ids, onReorder, enabled })
+  cfg.current = { ids, onReorder, enabled }
+  const els = useRef(new Map())
+  const refCbs = useRef(new Map())
+  const S = useRef(null)
+
+  const setRef = (id) => {
+    let cb = refCbs.current.get(id)
+    if (!cb) {
+      cb = (el) => (el ? els.current.set(id, el) : els.current.delete(id))
+      refCbs.current.set(id, cb)
+    }
+    return cb
+  }
+
+  const impl = useRef(null)
+  if (!impl.current) {
+    const clearMarks = () => els.current.forEach((el) => el.classList.remove('drop-before', 'drop-after'))
+
+    const apply = () => {
+      const d = S.current
+      if (!d) return
+      const { ids } = cfg.current
+      const dyC = d.pointerY - d.startY
+      const dyS = window.scrollY - d.startScroll
+      // the copy is position:fixed, so it tracks the pointer in viewport space only
+      if (d.clone) d.clone.style.transform = `translateY(${dyC}px)`
+      // where the copy's middle now sits, in the page coordinates captured at drag start
+      const center = d.selfMid + dyC + dyS
+      let to = 0
+      for (const r of d.rects) {
+        if (r.id === d.id) continue
+        if (r.mid < center) to++
+      }
+      clearMarks()
+      if (to !== d.from) {
+        const others = ids.filter((x) => x !== d.id)
+        if (to < others.length) els.current.get(others[to])?.classList.add('drop-before')
+        else els.current.get(others[others.length - 1])?.classList.add('drop-after')
+      }
+      d.to = to
+    }
+
+    const loop = () => {
+      const d = S.current
+      if (!d) return
+      const y = d.pointerY
+      const edge = 84
+      let px = 0
+      if (y > window.innerHeight - edge) px = Math.min(16, (y - window.innerHeight + edge) / 4)
+      else if (y < edge) px = -Math.min(16, (edge - y) / 4)
+      if (px) {
+        window.scrollBy(0, px)
+        apply()
+      }
+      d.raf = requestAnimationFrame(loop)
+    }
+
+    const onMove = (e) => {
+      const d = S.current
+      if (!d) return
+      d.pointerY = e.clientY
+      apply()
+    }
+
+    const finish = (commit) => {
+      const d = S.current
+      if (!d) return
+      S.current = null
+      cancelAnimationFrame(d.raf)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKey)
+      try { d.handle.releasePointerCapture(d.pointerId) } catch (er) {}
+      clearMarks()
+      if (d.clone) d.clone.remove()
+      els.current.get(d.id)?.classList.remove('sort-ghost')
+      document.body.classList.remove('sorting-active')
+      if (commit && d.to != null && d.to !== d.from) {
+        const { ids, onReorder } = cfg.current
+        const next = ids.filter((x) => x !== d.id)
+        next.splice(d.to, 0, d.id)
+        onReorder(next)
+      }
+      setDraggingId(null)
+    }
+    const onUp = () => finish(true)
+    const onCancel = () => finish(false)
+    const onKey = (e) => {
+      if (e.key === 'Escape') finish(false)
+    }
+
+    const start = (id, e) => {
+      const { ids, enabled } = cfg.current
+      if (!enabled || S.current) return
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      const rects = ids
+        .map((x) => {
+          const el = els.current.get(x)
+          if (!el) return null
+          const r = el.getBoundingClientRect()
+          return { id: x, mid: r.top + r.height / 2 }
+        })
+        .filter(Boolean)
+      const from = ids.indexOf(id)
+      const selfEl = els.current.get(id)
+      if (from < 0 || !selfEl || rects.length < 2) return
+      const r = selfEl.getBoundingClientRect()
+      const selfMid = r.top + r.height / 2
+      const handle = e.currentTarget
+
+      const clone = selfEl.cloneNode(true)
+      clone.classList.add('sort-clone')
+      clone.classList.remove('drop-before', 'drop-after')
+      clone.style.cssText +=
+        `;position:fixed;margin:0;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;` +
+        `box-sizing:border-box;z-index:9999;pointer-events:none`
+      document.body.appendChild(clone)
+      selfEl.classList.add('sort-ghost')
+
+      S.current = {
+        id,
+        from,
+        to: from,
+        rects,
+        selfMid,
+        startY: e.clientY,
+        pointerY: e.clientY,
+        startScroll: window.scrollY,
+        pointerId: e.pointerId,
+        handle,
+        clone,
+        raf: 0,
+      }
+      try { handle.setPointerCapture(e.pointerId) } catch (er) {}
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', onCancel)
+      window.addEventListener('keydown', onKey)
+      document.body.classList.add('sorting-active')
+      setDraggingId(id)
+      e.preventDefault()
+      e.stopPropagation()
+      S.current.raf = requestAnimationFrame(loop)
+    }
+
+    impl.current = { start, cancel: onCancel }
+  }
+
+  useEffect(() => () => impl.current.cancel(), [])
+
+  return {
+    setRef,
+    draggingId,
+    handleProps: (id) => ({
+      onPointerDown: (e) => impl.current.start(id, e),
+      title: 'גרירה לשינוי הסדר',
+      'aria-label': 'גרירה לשינוי הסדר',
+    }),
+  }
+}
+
 /* ---------------- rows ---------------- */
 function RowMenu({ items }) {
   const [open, setOpen] = useState(false)
@@ -722,9 +933,10 @@ function RowMenu({ items }) {
   )
 }
 
-function DishRow({ dish, owner, onToggleDone, onOpenAssign, onEdit, onDelete }) {
+function DishRow({ dish, owner, dragHandle, rootRef, onToggleDone, onOpenAssign, onEdit, onDelete }) {
   return (
-    <div className={'dish' + (dish.done ? ' done' : '')}>
+    <div className={'dish' + (dish.done ? ' done' : '')} ref={rootRef}>
+      {dragHandle}
       <button
         className={'check' + (dish.done ? ' on' : '')}
         onClick={onToggleDone}
@@ -764,6 +976,10 @@ function CategorySection({
   cdone,
   ctot,
   peopleById,
+  rootRef,
+  catHandleProps,
+  canReorder,
+  onReorderDishes,
   onAddDish,
   onEditCat,
   onDeleteCat,
@@ -772,9 +988,19 @@ function CategorySection({
   onToggleDone,
   onOpenAssign,
 }) {
+  const sort = useSortable(
+    dishes.map((d) => d.id),
+    (nextIds) => onReorderDishes(cat.id, nextIds),
+    canReorder,
+  )
   return (
-    <section className="cat">
+    <section className="cat" ref={rootRef}>
       <div className="cat-head">
+        {catHandleProps && (
+          <button type="button" tabIndex={-1} className="sort-handle cat-drag" {...catHandleProps}>
+            <Grip size={18} />
+          </button>
+        )}
         <span className="cat-emoji" data-tint={tint}>{cat.emoji}</span>
         <div className="cat-id">
           <h3 className="cat-title">{cat.name}</h3>
@@ -793,6 +1019,14 @@ function CategorySection({
             key={d.id}
             dish={d}
             owner={d.takenBy ? peopleById[d.takenBy] || null : null}
+            rootRef={sort.setRef(d.id)}
+            dragHandle={
+              canReorder && dishes.length > 1 ? (
+                <button type="button" tabIndex={-1} className="sort-handle sort-handle-sm" {...sort.handleProps(d.id)}>
+                  <Grip size={15} />
+                </button>
+              ) : null
+            }
             onToggleDone={() => onToggleDone(d)}
             onOpenAssign={() => onOpenAssign(d)}
             onEdit={() => onEditDish(d)}
@@ -965,6 +1199,13 @@ export default function App() {
     for (const p of people) m[p.id] = p
     return m
   }, [people])
+
+  const catSort = useSortable(
+    cats.map((c) => c.id),
+    (nextIds) => store.reorderCategories(nextIds),
+    !activePerson,
+  )
+  const reorderDishes = (catId, ids) => store.reorderDishes(catId, ids)
 
   function needIdentity(then) {
     setDialog({ type: 'identity', then })
@@ -1206,6 +1447,10 @@ export default function App() {
                 cdone={cdone}
                 ctot={all.length}
                 peopleById={peopleById}
+                rootRef={catSort.setRef(cat.id)}
+                catHandleProps={!activePerson && cats.length > 1 ? catSort.handleProps(cat.id) : null}
+                canReorder={!activePerson}
+                onReorderDishes={reorderDishes}
                 onAddDish={() => setDialog({ type: 'dish', defaultCategoryId: cat.id })}
                 onEditCat={() => setDialog({ type: 'category', editing: cat })}
                 onDeleteCat={() => confirmDelete('category', cat)}
