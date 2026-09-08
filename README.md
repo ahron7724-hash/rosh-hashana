@@ -10,57 +10,90 @@ npm install
 npm run dev
 ```
 
-הכתובת (למשל `http://localhost:5173`) עובדת רק על המחשב הזה, במצב מקומי
-(הנתונים ב-localStorage של הדפדפן).
+בלי הגדרת Supabase (למטה) — האפליקציה רצה במצב **מקומי**: הנתונים ב-localStorage
+של הדפדפן, לכל מכשיר עותק משלו.
 
-## בנייה
+## בנייה ופריסה
 
 ```bash
 npm run build     # תוצר סטטי ב-dist/
-npm run preview
 ```
 
-## פריסה ל-Vercel
+זו אפליקציית Vite סטטית — Vercel/Netlify מזהים אותה אוטומטית (Build: `npm run build`,
+Output: `dist`). אין פונקציות שרת.
 
-Vercel מזהה אוטומטית: Framework = Vite, Build = `npm run build`, Output = `dist`.
-תיקיית `api/` הופכת ל-Serverless Function בכתובת `/api/data`.
+## שמירה משותפת — Supabase (Postgres)
 
-1. להעלות ל-GitHub ואז New Project ב-Vercel (או `npx vercel`).
-2. Deploy → מתקבלת כתובת ציבורית.
+כדי שכל המשפחה תראה את אותו התפריט ואת אותם הסימונים, בזמן אמת:
 
-בשלב הזה האתר עובד, אבל עדיין **במצב מקומי** — לכל מכשיר עותק משלו.
+### 1. פרויקט Supabase
+- להירשם ב-[supabase.com](https://supabase.com) (חינם) → **New project**.
 
-## הפעלת השמירה המשותפת (קובץ JSON אחד בענן)
+### 2. הטבלאות
+- בפרויקט: **SQL Editor** → **New query** → להדביק ולהריץ:
 
-הנתונים נשמרים כקובץ `menu-data.json` יחיד ב-**Vercel Blob**. להפעלה:
+```sql
+create table if not exists categories (
+  id text primary key,
+  name text not null default 'נושא',
+  emoji text not null default '🍽️',
+  pos double precision not null default 0
+);
+create table if not exists people (
+  id text primary key,
+  name text not null default '',
+  color text not null default '#a83440',
+  pos double precision not null default 0
+);
+create table if not exists dishes (
+  id text primary key,
+  category_id text not null references categories(id) on delete cascade,
+  name text not null default '',
+  note text not null default '',
+  taken_by text,
+  done boolean not null default false,
+  pos double precision not null default 0
+);
 
-1. בלוח הבקרה של הפרויקט ב-Vercel: **Storage → Create Database → Blob** →
-   לחבר לפרויקט. זה מוסיף אוטומטית את משתנה הסביבה `BLOB_READ_WRITE_TOKEN`.
-2. **Redeploy** (Deployments → הפריסה האחרונה → ⋯ → Redeploy).
+alter table categories enable row level security;
+alter table people    enable row level security;
+alter table dishes    enable row level security;
 
-מעכשיו הדף עובד במצב **מסונכרן**: כל מי שנכנס לקישור רואה את אותו התפריט,
-והוא מתעדכן כל כמה שניות. אם שני אנשים עורכים בדיוק באותה שנייה — העריכה
-האחרונה גוברת (נדיר בשימוש משפחתי).
+create policy "family read"  on categories for select using (true);
+create policy "family write" on categories for all    using (true) with check (true);
+create policy "family read2" on people     for select using (true);
+create policy "family write2" on people    for all    using (true) with check (true);
+create policy "family read3" on dishes     for select using (true);
+create policy "family write3" on dishes    for all    using (true) with check (true);
+```
 
-חינם עד 1GB אחסון. הכתובת של הקובץ עצמו לא נחשפת בדפדפן — הכול עובר דרך `/api/data`.
+*(המדיניות מתירה לכל מי שיש לו הקישור לקרוא ולכתוב — מתאים לתפריט משפחתי.
+המפתח הציבורי לא נותן גישה לשום דבר אחר בפרויקט.)*
 
-## שמירת נתונים — סיכום
+### 3. המפתחות
+- Supabase → **Project Settings → API**:
+  - **Project URL** (משהו כמו `https://abcd.supabase.co`)
+  - **anon public** key
 
-| מצב | מתי | איפה נשמר |
-|---|---|---|
-| מקומי | לפני חיבור Blob, או בהרצה מקומית | localStorage בדפדפן |
-| מסונכרן | אחרי חיבור Blob ב-Vercel | קובץ JSON אחד ב-Vercel Blob |
+### 4. משתני סביבה
+- ב-Vercel: **Settings → Environment Variables** → להוסיף (לכל הסביבות):
+  - `VITE_SUPABASE_URL` = ה-Project URL
+  - `VITE_SUPABASE_ANON_KEY` = ה-anon key
+- **Redeploy**.
 
-בשני המצבים: תפריט ⋯ ← **ייצוא/ייבוא** לקובץ JSON לגיבוי או להעברה ידנית.
+מעכשיו הפוטר יכתוב **"מסונכרן"**. הביקור הראשון זורע את התפריט המלא; כל שינוי
+נכתב כשורה בודדת ב-Postgres, והדף קורא מחדש כל ~3.5 שניות. הוספות של שני אנשים
+במקביל לא דורסות זו את זו.
+
+להרצה מקומית מול Supabase: קובץ `.env.local` עם אותם שני המשתנים.
 
 ## מבנה
 
 ```
-index.html            נקודת הכניסה
+index.html
 vite.config.js
-api/data.js            ה-Serverless Function (קריאה/כתיבה של קובץ ה-JSON)
 src/
   main.jsx
-  App.jsx              כל הלוגיקה + ה-store (סנכרון ענן + fallback מקומי)
-  styles.css           עיצוב, RTL, מצב יום/לילה
+  App.jsx      כל הלוגיקה + ה-store (Supabase או localStorage)
+  styles.css   עיצוב, RTL, מצב יום/לילה
 ```

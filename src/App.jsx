@@ -139,43 +139,74 @@ function normalize(raw) {
   }
 }
 
-// Union by id — items present on both sides take the local version, items on
-// only one side are kept. Prevents concurrent additions from clobbering.
-function mergeById(serverArr, localArr) {
-  const m = new Map()
-  for (const x of serverArr) m.set(x.id, x)
-  for (const x of localArr) m.set(x.id, x)
-  return [...m.values()]
+/* ---------------- store ----------------
+ * Shared menu in a Supabase (Postgres) database when VITE_SUPABASE_URL and
+ * VITE_SUPABASE_ANON_KEY are set; otherwise this browser's localStorage.
+ * Every row is inserted / updated / deleted on its own, so concurrent edits
+ * from different people never clobber each other. Changes are applied locally
+ * at once (optimistic) and the page re-reads every few seconds to pick up
+ * other people's changes. localStorage is kept as an offline cache.
+ */
+const SB_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '')
+const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+const HAS_DB = !!(SB_URL && SB_KEY)
+const POLL_MS = 3500
+
+const catToRow = (c) => ({ id: c.id, name: c.name, emoji: c.emoji, pos: c.order ?? 0 })
+const catFromRow = (r) => ({ id: r.id, name: r.name, emoji: r.emoji || '🍽️', order: r.pos ?? 0 })
+const personToRow = (p) => ({ id: p.id, name: p.name, color: p.color, pos: p.order ?? 0 })
+const personFromRow = (r) => ({ id: r.id, name: r.name, color: r.color || AVATAR_COLORS[0], order: r.pos ?? 0 })
+const dishToRow = (d) => ({
+  id: d.id, category_id: d.categoryId, name: d.name, note: d.note ?? '',
+  taken_by: d.takenBy ?? null, done: !!d.done, pos: d.order ?? 0,
+})
+const dishFromRow = (r) => ({
+  id: r.id, categoryId: r.category_id, name: r.name, note: r.note || '',
+  takenBy: r.taken_by ?? null, done: !!r.done, order: r.pos ?? 0,
+})
+function patchRow(map, p) {
+  const o = {}
+  for (const [from, to] of map) if (from in p) o[to] = p[from]
+  return o
 }
-function mergeState(server, local) {
-  const categories = mergeById(server.categories, local.categories)
-  const catIds = new Set(categories.map((c) => c.id))
+const catPatch = (p) => patchRow([['name', 'name'], ['emoji', 'emoji'], ['order', 'pos']], p)
+const personPatch = (p) => patchRow([['name', 'name'], ['color', 'color'], ['order', 'pos']], p)
+const dishPatch = (p) =>
+  patchRow([['categoryId', 'category_id'], ['name', 'name'], ['note', 'note'], ['takenBy', 'taken_by'], ['done', 'done'], ['order', 'pos']], p)
+
+function sbFetch(path, opts = {}) {
+  return fetch(`${SB_URL}/rest/v1/${path}`, {
+    ...opts,
+    headers: {
+      apikey: SB_KEY,
+      authorization: `Bearer ${SB_KEY}`,
+      'content-type': 'application/json',
+      ...(opts.headers || {}),
+    },
+  })
+}
+const sbOk = (r) => (r.ok ? r : Promise.reject(new Error(r.status)))
+
+async function sbSelectAll() {
+  const [c, p, d] = await Promise.all([
+    sbFetch('categories?select=*').then(sbOk).then((r) => r.json()),
+    sbFetch('people?select=*').then(sbOk).then((r) => r.json()),
+    sbFetch('dishes?select=*').then(sbOk).then((r) => r.json()),
+  ])
   return {
-    categories,
-    dishes: mergeById(server.dishes, local.dishes).filter((d) => catIds.has(d.categoryId)),
-    people: mergeById(server.people, local.people),
+    categories: c.map(catFromRow).sort(bySort),
+    people: p.map(personFromRow).sort(bySort),
+    dishes: d.map(dishFromRow).sort(bySort),
   }
 }
-
-/* ---------------- store ----------------
- * One shared JSON "file" in the cloud (Vercel Blob, via /api/data) when it's
- * configured; otherwise falls back to this browser's localStorage. Either way
- * localStorage is kept as an offline cache. In shared mode the page pushes the
- * whole document on every change (debounced) and polls every few seconds to
- * pick up other people's changes.
- */
-const API = '/api/data'
-const POLL_MS = 4000
-const PUSH_MS = 700
 
 function createStore(onMode) {
   const subs = new Set()
   let state = loadLocal()
-  let mode = 'local' // 'local' | 'remote'
-  let lastRev = 0
-  let dirty = false // local edits not yet confirmed to the server
-  let pushTimer = null
+  let mode = 'local' // 'local' | 'db'
+  let pending = 0 // in-flight writes — pause polling while > 0
   let pollTimer = null
+  let refetchT = null
   let dead = false
 
   function loadLocal() {
@@ -190,7 +221,9 @@ function createStore(onMode) {
       localStorage.setItem(LS_DATA, JSON.stringify(state))
     } catch (e) {}
   }
-  function emit() {
+  function setState(next) {
+    state = next
+    saveLocal()
     subs.forEach((f) => f(state))
   }
   function setMode(m) {
@@ -199,183 +232,164 @@ function createStore(onMode) {
       if (onMode) onMode(m)
     }
   }
+  const local = (fn) => setState(fn(state))
 
-  function commit(next) {
-    state = next
-    saveLocal()
-    emit()
-    if (mode === 'remote') {
-      dirty = true
-      clearTimeout(pushTimer)
-      pushTimer = setTimeout(push, PUSH_MS)
-    }
-  }
-
-  async function push() {
-    if (dead || mode !== 'remote') return
-
-    // If another device wrote since our last sync, merge their state under
-    // ours (union by id) so concurrent additions are never lost.
-    try {
-      const r0 = await fetch(API, { cache: 'no-store' })
-      if (r0.ok) {
-        const j0 = await r0.json()
-        if (j0 && j0.data && j0.rev > lastRev) {
-          state = mergeState(normalize(j0.data), state)
-          lastRev = j0.rev
-          saveLocal()
-          emit()
-        }
-      }
-    } catch (e) {}
-
-    const snap = state
-    try {
-      const r = await fetch(API, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ data: snap }),
+  function write(promise) {
+    if (mode !== 'db') return
+    pending++
+    Promise.resolve(promise)
+      .catch((e) => console.warn('[db write]', e))
+      .finally(() => {
+        pending--
+        clearTimeout(refetchT)
+        refetchT = setTimeout(refetch, 250)
       })
-      if (!r.ok) throw new Error('PUT ' + r.status)
-      const j = await r.json()
-      if (j && j.rev) lastRev = j.rev
-      if (state !== snap) {
-        clearTimeout(pushTimer)
-        pushTimer = setTimeout(push, 400)
-      } else {
-        dirty = false
-      }
-    } catch (e) {
-      if (!dead) setTimeout(push, 3000)
-    }
   }
 
-  async function poll() {
-    if (dead || mode !== 'remote' || dirty) return
+  async function refetch() {
+    if (dead || mode !== 'db' || pending > 0) return
     try {
-      const r = await fetch(API, { cache: 'no-store' })
-      if (!r.ok) return
-      const j = await r.json()
-      if (j && j.data && j.rev > lastRev && !dirty) {
-        lastRev = j.rev
-        state = normalize(j.data)
-        saveLocal()
-        emit()
-      }
+      const next = await sbSelectAll()
+      if (dead || pending > 0) return
+      if (JSON.stringify(next) !== JSON.stringify(state)) setState(next)
     } catch (e) {}
   }
 
-  async function getRemote() {
-    try {
-      const r = await fetch(API, { cache: 'no-store' })
-      const ct = r.headers.get('content-type') || ''
-      const j = ct.includes('json') ? await r.json().catch(() => null) : null
-      return { status: r.status, j }
-    } catch (e) {
-      return { status: 0, j: null }
-    }
+  async function insertAll(s) {
+    await Promise.all([
+      s.people.length && sbFetch('people', { method: 'POST', body: JSON.stringify(s.people.map(personToRow)) }).then(sbOk),
+      s.categories.length && sbFetch('categories', { method: 'POST', body: JSON.stringify(s.categories.map(catToRow)) }).then(sbOk),
+    ])
+    if (s.dishes.length) await sbFetch('dishes', { method: 'POST', body: JSON.stringify(s.dishes.map(dishToRow)) }).then(sbOk)
+  }
+  async function deleteAll() {
+    await sbFetch('dishes?id=not.is.null', { method: 'DELETE' }).then(sbOk)
+    await Promise.all([
+      sbFetch('categories?id=not.is.null', { method: 'DELETE' }).then(sbOk),
+      sbFetch('people?id=not.is.null', { method: 'DELETE' }).then(sbOk),
+    ])
+  }
+  function replaceAll(payload) {
+    const s = normalize(payload)
+    setState(s)
+    if (mode !== 'db') return
+    write(deleteAll().then(() => insertAll(s)))
   }
 
   async function init() {
-    const { status, j } = await getRemote()
-    if (dead) return
-
-    // No usable backend (dev server / static host / blob not configured) -> local mode.
-    if (!status || status === 501 || !j) {
+    if (!HAS_DB) {
       setMode('local')
       return
     }
-
-    setMode('remote')
-    if (status === 200 && j.data && j.rev) {
-      // adopt the existing shared menu
-      lastRev = j.rev
-      state = normalize(j.data)
-      saveLocal()
-      emit()
-    } else if (status === 200 && j.data == null) {
-      // store is confirmed empty — re-check once, then seed with what we have
-      const again = await getRemote()
+    try {
+      let next = await sbSelectAll()
       if (dead) return
-      if (again.status === 200 && again.j && again.j.data && again.j.rev) {
-        lastRev = again.j.rev
-        state = normalize(again.j.data)
-        saveLocal()
-        emit()
-      } else if (again.status === 200 && again.j && again.j.data == null) {
-        await push()
+      setMode('db')
+      if (!next.categories.length && !next.dishes.length && !next.people.length) {
+        await insertAll(normalize(STARTER))
+        next = await sbSelectAll()
       }
+      if (!dead) setState(next)
+      pollTimer = setInterval(refetch, POLL_MS)
+    } catch (e) {
+      console.warn('[db init]', e)
+      setMode('local')
     }
-    // else: read error (502) or ambiguous — do NOT seed / overwrite.
-    // poll() adopts the real data as soon as it becomes readable.
-    pollTimer = setInterval(poll, POLL_MS)
   }
   init()
-
-  const mutate = (fn) => commit(fn(state))
 
   return {
     getState: () => state,
     mode: () => mode,
     destroy() {
       dead = true
-      clearTimeout(pushTimer)
       clearInterval(pollTimer)
+      clearTimeout(refetchT)
     },
     subscribe(f) {
       subs.add(f)
       f(state)
       return () => subs.delete(f)
     },
+
     addCategory(d) {
       const id = uid()
-      mutate((s) => ({ ...s, categories: [...s.categories, { id, ...d }] }))
+      const c = { id, name: d.name, emoji: d.emoji, order: d.order ?? Date.now() }
+      local((s) => ({ ...s, categories: [...s.categories, c] }))
+      write(sbFetch('categories', { method: 'POST', body: JSON.stringify(catToRow(c)) }).then(sbOk))
       return id
     },
     updateCategory(id, p) {
-      mutate((s) => ({ ...s, categories: s.categories.map((c) => (c.id === id ? { ...c, ...p } : c)) }))
+      local((s) => ({ ...s, categories: s.categories.map((c) => (c.id === id ? { ...c, ...p } : c)) }))
+      write(sbFetch(`categories?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(catPatch(p)) }).then(sbOk))
     },
     deleteCategory(id) {
-      mutate((s) => ({
+      local((s) => ({
         ...s,
         categories: s.categories.filter((c) => c.id !== id),
         dishes: s.dishes.filter((x) => x.categoryId !== id),
       }))
+      write(
+        sbFetch(`dishes?category_id=eq.${id}`, { method: 'DELETE' })
+          .then(sbOk)
+          .then(() => sbFetch(`categories?id=eq.${id}`, { method: 'DELETE' }).then(sbOk)),
+      )
     },
     addDish(d) {
       const id = uid()
-      mutate((s) => ({ ...s, dishes: [...s.dishes, { id, ...d }] }))
+      const x = {
+        id,
+        categoryId: d.categoryId,
+        name: d.name,
+        note: d.note ?? '',
+        takenBy: d.takenBy ?? null,
+        done: false,
+        order: d.order ?? Date.now(),
+      }
+      local((s) => ({ ...s, dishes: [...s.dishes, x] }))
+      write(sbFetch('dishes', { method: 'POST', body: JSON.stringify(dishToRow(x)) }).then(sbOk))
       return id
     },
     updateDish(id, p) {
-      mutate((s) => ({ ...s, dishes: s.dishes.map((x) => (x.id === id ? { ...x, ...p } : x)) }))
+      local((s) => ({ ...s, dishes: s.dishes.map((x) => (x.id === id ? { ...x, ...p } : x)) }))
+      write(sbFetch(`dishes?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(dishPatch(p)) }).then(sbOk))
     },
     deleteDish(id) {
-      mutate((s) => ({ ...s, dishes: s.dishes.filter((x) => x.id !== id) }))
+      local((s) => ({ ...s, dishes: s.dishes.filter((x) => x.id !== id) }))
+      write(sbFetch(`dishes?id=eq.${id}`, { method: 'DELETE' }).then(sbOk))
     },
     addPerson(d) {
       const id = uid()
-      mutate((s) => ({ ...s, people: [...s.people, { id, ...d }] }))
+      const p = { id, name: d.name, color: d.color, order: d.order ?? Date.now() }
+      local((s) => ({ ...s, people: [...s.people, p] }))
+      write(sbFetch('people', { method: 'POST', body: JSON.stringify(personToRow(p)) }).then(sbOk))
       return id
     },
     updatePerson(id, p) {
-      mutate((s) => ({ ...s, people: s.people.map((x) => (x.id === id ? { ...x, ...p } : x)) }))
+      local((s) => ({ ...s, people: s.people.map((x) => (x.id === id ? { ...x, ...p } : x)) }))
+      write(sbFetch(`people?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(personPatch(p)) }).then(sbOk))
     },
     deletePerson(id) {
-      mutate((s) => ({
+      local((s) => ({
         ...s,
         people: s.people.filter((x) => x.id !== id),
         dishes: s.dishes.map((x) => (x.takenBy === id ? { ...x, takenBy: null } : x)),
       }))
+      write(
+        sbFetch(`dishes?taken_by=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ taken_by: null }) })
+          .then(sbOk)
+          .then(() => sbFetch(`people?id=eq.${id}`, { method: 'DELETE' }).then(sbOk)),
+      )
     },
     importAll(payload) {
-      commit(normalize(payload))
+      replaceAll(payload)
     },
     resetToStarter() {
-      commit(normalize(STARTER))
+      replaceAll(STARTER)
     },
     clearAll() {
-      commit({ categories: [], dishes: [], people: [] })
+      setState({ categories: [], dishes: [], people: [] })
+      if (mode === 'db') write(deleteAll())
     },
   }
 }
@@ -1218,8 +1232,8 @@ export default function App() {
       </div>
 
       <footer className="foot">
-        {mode === 'remote'
-          ? 'מסונכרן — כל מי שנכנס לקישור רואה את אותו התפריט (מתעדכן כל כמה שניות). ⋯ לייצוא גיבוי.'
+        {mode === 'db'
+          ? 'מסונכרן — כל מי שנכנס לקישור רואה את אותו התפריט, מתעדכן כל כמה שניות. ⋯ לייצוא גיבוי.'
           : 'מצב מקומי — השינויים נשמרים בדפדפן הזה. דרך ⋯ אפשר לייצא קובץ ולטעון אותו במכשיר אחר.'}
       </footer>
 
