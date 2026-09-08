@@ -200,6 +200,8 @@ async function sbSelectAll() {
   }
 }
 
+const ACTIVE_MS = 40000 // stop polling after this long with no user activity
+
 function createStore(onMode) {
   const subs = new Set()
   let state = loadLocal()
@@ -208,6 +210,9 @@ function createStore(onMode) {
   let pollTimer = null
   let refetchT = null
   let dead = false
+  let lastActive = Date.now()
+  let idle = false
+  let unwire = null
 
   function loadLocal() {
     try {
@@ -255,6 +260,40 @@ function createStore(onMode) {
     } catch (e) {}
   }
 
+  // Only poll while someone is actually looking / interacting. When idle
+  // (no activity for ACTIVE_MS, or tab hidden) polling stops entirely; the
+  // next interaction resumes it with an immediate refetch.
+  function markActive() {
+    lastActive = Date.now()
+    if (idle) {
+      idle = false
+      refetch()
+    }
+  }
+  function tick() {
+    if (dead || mode !== 'db' || pending > 0) return
+    const hidden = typeof document !== 'undefined' && document.hidden
+    if (hidden || Date.now() - lastActive > ACTIVE_MS) {
+      idle = true
+      return
+    }
+    refetch()
+  }
+  function wireActivity() {
+    if (typeof window === 'undefined') return
+    const evs = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'focus']
+    const onAct = () => markActive()
+    const onVis = () => {
+      if (!document.hidden) markActive()
+    }
+    evs.forEach((e) => window.addEventListener(e, onAct, { passive: true }))
+    document.addEventListener('visibilitychange', onVis)
+    unwire = () => {
+      evs.forEach((e) => window.removeEventListener(e, onAct))
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }
+
   async function insertAll(s) {
     await Promise.all([
       s.people.length && sbFetch('people', { method: 'POST', body: JSON.stringify(s.people.map(personToRow)) }).then(sbOk),
@@ -290,7 +329,8 @@ function createStore(onMode) {
         next = await sbSelectAll()
       }
       if (!dead) setState(next)
-      pollTimer = setInterval(refetch, POLL_MS)
+      wireActivity()
+      pollTimer = setInterval(tick, POLL_MS)
     } catch (e) {
       console.warn('[db init]', e)
       setMode('local')
@@ -305,6 +345,7 @@ function createStore(onMode) {
       dead = true
       clearInterval(pollTimer)
       clearTimeout(refetchT)
+      if (unwire) unwire()
     },
     subscribe(f) {
       subs.add(f)
