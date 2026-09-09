@@ -4,6 +4,23 @@ import { createPortal } from 'react-dom'
 /* ---------------- constants ---------------- */
 const LS_DATA = 'rh-menu-data-v1'
 const LS_ME = 'rh-menu-me-v1'
+const LS_GATE = 'rh-menu-gate-v1'
+
+/* Entry gate. Only the SHA-256 of the (normalised) code lives in the bundle,
+ * so opening dev-tools doesn't hand anyone the code. Once entered it's kept
+ * in localStorage on that device for good. Code phrase: "ראש השנה - משפחת לב". */
+const GATE_HASH = 'a4f2323122e70e374528f0c6e6136775f346a3ab2ca58f111d4ee50391726fbd'
+const normCode = (s) => (s || '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+async function gateOk(s) {
+  if (!normCode(s)) return false
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normCode(s)))
+    const hex = Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('')
+    return hex === GATE_HASH
+  } catch (e) {
+    return false
+  }
+}
 const EMOJIS = ['🍎', '🍯', '🥗', '🍲', '🍗', '🍰', '🍷', '🍞', '🫓', '🥘', '🐟', '🍇', '🥕', '🧆', '🍮', '🥂', '🌰', '🫒']
 const AVATAR_COLORS = ['#a83440', '#a9772a', '#5f7344', '#7c4e78', '#4f6191', '#a25436', '#2f7d70', '#8f3d5e']
 
@@ -125,6 +142,7 @@ const Download = (p) => <svg {...base(p)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 
 const Upload = (p) => <svg {...base(p)}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
 const Sparkle = (p) => <svg {...base(p)} fill="currentColor" stroke="none"><path d="M12 2l1.9 5.6L19.5 9l-4.6 3.3L16 18l-4-3.3L8 18l1.1-5.7L4.5 9l5.6-1.4Z" /></svg>
 const Megaphone = (p) => <svg {...base(p)}><path d="m3 11 18-5v12L3 14v-3z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" /></svg>
+const Lock = (p) => <svg {...base(p)}><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
 
 const Pom = () => (
   <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -1286,8 +1304,86 @@ function AnnouncementBar({ announcement, onSave }) {
   )
 }
 
+/* ---------------- entry gate ---------------- */
+function Gate({ onPass }) {
+  const [val, setVal] = useState('')
+  const [bad, setBad] = useState(false)
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    // one-tap link for family: …/?code=ראש השנה - משפחת לב
+    let fromUrl = ''
+    try {
+      fromUrl = new URL(window.location.href).searchParams.get('code') || ''
+    } catch (e) {}
+    if (!fromUrl) {
+      setChecking(false)
+      return
+    }
+    gateOk(fromUrl).then((ok) => {
+      if (!ok) {
+        setChecking(false)
+        return
+      }
+      try { localStorage.setItem(LS_GATE, '1') } catch (e) {}
+      try {
+        const u = new URL(window.location.href)
+        u.searchParams.delete('code')
+        window.history.replaceState({}, '', u.pathname + u.search + u.hash)
+      } catch (e) {}
+      onPass()
+    })
+  }, [onPass])
+
+  async function submit(e) {
+    e.preventDefault()
+    if (await gateOk(val)) {
+      try { localStorage.setItem(LS_GATE, '1') } catch (e) {}
+      onPass()
+    } else {
+      setBad(true)
+      setVal('')
+    }
+  }
+
+  if (checking) return <div className="gate" />
+
+  return (
+    <div className="gate">
+      <div className="gate-box">
+        <div className="gate-emojis">😤🚫🙅‍♀️👀⛔</div>
+        <h1 className="gate-title">אל תתחפרן</h1>
+        <p className="gate-sub">הדף הזה נעול. מהמשפחה? יש לך את הקוד.</p>
+        <form className={'gate-form' + (bad ? ' bad' : '')} onSubmit={submit}>
+          <input
+            value={val}
+            onChange={(e) => { setVal(e.target.value); setBad(false) }}
+            placeholder="קוד כניסה"
+            aria-label="קוד כניסה"
+            autoFocus
+          />
+          <button type="submit" className="btn primary">כניסה</button>
+        </form>
+        {bad && <div className="gate-bad">קוד שגוי. נסו שוב 😒</div>}
+      </div>
+    </div>
+  )
+}
+
 /* ---------------- App ---------------- */
 export default function App() {
+  const [unlocked, setUnlocked] = useState(() => {
+    try {
+      return localStorage.getItem(LS_GATE) === '1'
+    } catch (e) {
+      return false
+    }
+  })
+  if (!unlocked) return <Gate onPass={() => setUnlocked(true)} />
+  return <Menu />
+}
+
+function Menu() {
   const [mode, setMode] = useState('local')
   const store = useMemo(() => createStore(setMode), [])
   const [data, setData] = useState(store.getState)
@@ -1484,6 +1580,17 @@ export default function App() {
       },
     })
   }
+  function handleLock() {
+    setMenuOpen(false)
+    setDialog({
+      type: 'confirm',
+      body: 'לנעול את הדף במכשיר הזה? כדי להיכנס שוב צריך להקליד את קוד המשפחה.',
+      onYes: () => {
+        try { localStorage.removeItem(LS_GATE) } catch (e) {}
+        window.location.reload()
+      },
+    })
+  }
   function handleClear() {
     setMenuOpen(false)
     setDialog({
@@ -1536,6 +1643,7 @@ export default function App() {
           <button className="popover-item" onClick={handleExport}><Download size={15} /> ייצוא לקובץ</button>
           <button className="popover-item" onClick={handleImportClick}><Upload size={15} /> ייבוא מקובץ</button>
           <button className="popover-item" onClick={handleResetStarter}><Sparkle size={15} /> טעינת התפריט המלא</button>
+          <button className="popover-item" onClick={handleLock}><Lock size={15} /> נעילת הדף במכשיר הזה</button>
           <button className="popover-item danger" onClick={handleClear}><Trash size={15} /> איפוס התפריט</button>
         </Popover>
       )}
